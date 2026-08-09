@@ -1,0 +1,12 @@
+[
+  {"snapshot_id": "b-app-1", "repo": "vault/app", "vault": "hot", "ts": 1735714800, "size_bytes": 4000000000, "pinned": false, "note": "nightly"},
+  {"snapshot_id": "b-app-2", "repo": "vault/app", "vault": "hot", "ts": 1735729200, "size_bytes": 4500000000, "pinned": false, "note": "midday"},
+  {"snapshot_id": "b-app-3", "repo": "vault/app", "vault": "hot", "ts": 1735801200, "size_bytes": 6000000000, "pinned": true, "note": "release pin"},
+  {"snapshot_id": "b-app-4", "repo": "vault/app", "vault": "hot", "ts": 1735815600, "size_bytes": 3000000000, "pinned": false, "note": "delta"},
+  {"snapshot_id": "b-app-5", "repo": "vault/app", "vault": "hot", "ts": 1735887600, "size_bytes": 7000000000, "pinned": false, "note": "delta big"},
+  {"snapshot_id": "b-app-6", "repo": "vault/app", "vault": "hot", "ts": 1735902000, "size_bytes": 2000000000, "pinned": false, "note": "delta small"},
+  {"snapshot_id": "b-obj-1", "repo": "vault/obj", "vault": "cold", "ts": 1735725600, "size_bytes": 1500000000, "pinned": false, "note": "weekly"},
+  {"snapshot_id": "b-obj-1", "repo": "vault/obj", "vault": "cold", "ts": 1735725600, "size_bytes": 8000000000, "pinned": false, "note": "re-emit inflated bigger"},
+  {"snapshot_id": "b-obj-2", "repo": "vault/obj", "vault": "cold", "ts": 1738404000, "size_bytes": 1600000000, "pinned": false, "note": "monthly full"},
+  {"snapshot_id": "b-obj-3", "repo": "vault/obj", "vault": "cold", "ts": 1738490400, "size_bytes": 1400000000, "pinned": false, "note": "monthly follow"}
+]

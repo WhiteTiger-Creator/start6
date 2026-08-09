@@ -1,0 +1,9 @@
+Act as the storage-platform engineer picking up after a failed backup-platform rollout. The rollout truncated the authoritative snapshot inventory at `/app/data/snapshots.json` and left the control-plane retention reconciler at `/app/workflow/reconcile_retention.py` evaluating stale draft rules instead of the storage governance board's final decisions.
+
+Nothing the reconciler produces can be trusted until that inventory is rebuilt. A pre-incident catalogue and a replay journal of the snapshot records created after it both survive alongside the truncated file under `/app/data`. How the two merge, which one wins where they overlap, how a retraction is handled and the order of the result are governance decisions rather than your choice, and the inventory has to be restored at its expected path before the reconciler is worth running.
+
+Then restore the reconciler itself. Preserve its `--input` and `--output-dir` command-line options and their defaults, and always read the retention policy and the pin registry from their fixed absolute paths under `/app/data`; `--input` selects the snapshot inventory only.
+
+`/app/docs/report_spec.json` is the output contract: paths, schemas, required-field lists, field coercions, container shapes and sort orders. It says nothing about how any value is derived. Reconstruct that from `/app/incident/retention_governance_log.md`, which is mostly routine noise and records rules that were drafted, revised and reversed over several months; where entries conflict, the later dated decision governs.
+
+A run writes exactly `/app/output/summary.json`, `/app/output/retention_state.json` and `/app/output/retention_decisions.jsonl`. Derive every value from the operational inputs: standard library only, no date or retention-scheduling library, correct against an alternate snapshot stream, identical across reruns, and leave the frozen incident snapshot in `/app/workflow` untouched.

@@ -1,0 +1,5 @@
+[
+  {"repo": "vault/pg", "snapshot_id": "pg-2b", "hold": "legal", "note": "litigation hold on migration delta"},
+  {"repo": "media/assets", "snapshot_id": "ma-4", "hold": "compliance", "note": "retention audit sample"},
+  {"repo": "vault/redis", "snapshot_id": "rd-z", "hold": "revoked", "note": "expired hold, not a recognized state"}
+]

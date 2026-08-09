@@ -1,0 +1,63 @@
+[
+  {
+    "journal_seq": 4,
+    "journal_op": "append",
+    "snapshot_id": "pg-2d",
+    "repo": "vault/pg",
+    "vault": "hot",
+    "ts": 1735927200,
+    "size_bytes": 6000000000,
+    "pinned": false,
+    "note": "late delta"
+  },
+  {
+    "journal_seq": 1,
+    "journal_op": "append",
+    "snapshot_id": "pg-0a",
+    "repo": "vault/pg",
+    "vault": "hot",
+    "ts": 1735711200,
+    "size_bytes": 5000000000,
+    "pinned": false,
+    "note": "nightly base"
+  },
+  {
+    "journal_seq": 6,
+    "journal_op": "append",
+    "snapshot_id": "rd-c",
+    "repo": "vault/redis",
+    "vault": "warm",
+    "ts": 1739260800,
+    "size_bytes": 1100000000,
+    "pinned": false,
+    "note": "weekly full follow up"
+  },
+  {
+    "journal_seq": 3,
+    "journal_op": "retract",
+    "snapshot_id": "rollout-probe-1",
+    "reason": "rollout synthetic load probe, not a production snapshot"
+  },
+  {
+    "journal_seq": 2,
+    "journal_op": "append",
+    "snapshot_id": "pg-2c",
+    "repo": "vault/pg",
+    "vault": "hot",
+    "ts": 1735909200,
+    "size_bytes": 5000000000,
+    "pinned": true,
+    "note": "release freeze"
+  },
+  {
+    "journal_seq": 5,
+    "journal_op": "append",
+    "snapshot_id": "rd-b",
+    "repo": "vault/redis",
+    "vault": "warm",
+    "ts": 1739174400,
+    "size_bytes": 1200000000,
+    "pinned": false,
+    "note": "weekly full after freeze"
+  }
+]

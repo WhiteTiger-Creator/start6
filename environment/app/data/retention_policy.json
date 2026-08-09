@@ -1,0 +1,14 @@
+{
+  "default": {
+    "cap_daily": 5,
+    "cap_weekly": 3,
+    "cap_monthly": 4,
+    "cap_yearly": 2,
+    "prune_cap": 3
+  },
+  "repo_overrides": {
+    "vault/pg": {
+      "cap_daily": 2
+    }
+  }
+}

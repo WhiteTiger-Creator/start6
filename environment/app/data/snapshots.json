@@ -1,0 +1,56 @@
+[
+  {
+    "snapshot_id": "pg-0a",
+    "repo": "vault/pg",
+    "vault": "hot",
+    "ts": 1735711200,
+    "size_bytes": 5000000000,
+    "pinned": false,
+    "note": "nightly base"
+  },
+  {
+    "snapshot_id": "pg-0b",
+    "repo": "vault/pg",
+    "vault": "hot",
+    "ts": 1735725600,
+    "size_bytes": 6000000000,
+    "pinned": false,
+    "note": "midday delta"
+  },
+  {
+    "snapshot_id": "pg-0c",
+    "repo": "vault/pg",
+    "vault": "hot",
+    "ts": 1735740000,
+    "size_bytes": 4000000000,
+    "pinned": false,
+    "note": "evening delta"
+  },
+  {
+    "snapshot_id": "pg-1a",
+    "repo": "vault/pg",
+    "vault": "hot",
+    "ts": 1735797600,
+    "size_bytes": 7000000000,
+    "pinned": false,
+    "note": "nightly base"
+  },
+  {
+    "snapshot_id": "pg-1b",
+    "repo": "vault/pg",
+    "vault": "hot",
+    "ts": 1735808400,
+    "size_bytes": 3000000000,
+    "pinned": false,
+    "note": "morning delta"
+  },
+  {
+    "snapshot_id": "pg-1c",
+    "repo": "vault/pg",
+    "vault": "hot",
+    "ts": 1735830000,
+    "size_bytes": 8000000000,
+    "pinned": false,
+    "note": "evening delta"
+  }
+]
