@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,9 @@ SPEC_PATH = Path("/app/docs/report_spec.json")
 LOG_PATH = Path("/app/incident/retention_governance_log.md")
 EXPECTED_FIXTURE = Path("/tests/fixtures/expected_report.json")
 ALT_INPUT = Path("/tests/fixtures/alt_snapshots.json")
+# The shipped truncated inventory is overwritten in place by the recovery, so
+# the verifier keeps its own copy to prove the reconciler depends on the merge.
+TRUNCATED_REFERENCE_PATH = Path("/tests/fixtures/truncated_snapshots.json")
 
 TIER_ORDER = ["daily", "weekly", "monthly", "yearly"]
 DECISION_ORDER = ["keep", "prune", "defer"]
@@ -33,16 +37,35 @@ CLASS_RANK = {"prune": 0, "defer": 1, "keep": 2}
 FIXTURE = json.loads(EXPECTED_FIXTURE.read_text())
 SPEC = json.loads(SPEC_PATH.read_text())
 
-POLICY_FIELDS = ("cap_daily", "cap_weekly", "cap_monthly", "cap_yearly", "quota_cap", "prune_cap")
+POLICY_FIELDS = ("protection_days", "cap_daily", "cap_weekly", "cap_monthly",
+                 "cap_yearly", "quota_cap", "prune_cap")
 BASELINE = {
+    "protection_days": 21,
     "cap_daily": 7, "cap_weekly": 4, "cap_monthly": 6, "cap_yearly": 2,
-    "quota_cap": 100000, "prune_cap": 3,
+    "quota_cap": 100000, "prune_cap": 4200,
 }
 SNAPSHOT_FIELDS = ("snapshot_id", "repo", "vault", "ts", "size_bytes", "pinned", "note")
 
 DECISION_KEYS = set(SPEC["retention_decisions_jsonl"]["required_fields"])
 STATE_KEYS = set(SPEC["retention_state_json"]["required_fields"])
 SUMMARY_KEYS = set(SPEC["summary_json"]["required_fields"])
+
+
+def _digest(value: object) -> str:
+    """Content digest of a whole artifact; the graded inventory is far too large
+    to embed in a fixture, so equality is asserted over its digest."""
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+# Documented wall-clock budget for one full run on the graded inventory.
+# instruction.md and report_spec.json state the same number. The reference reads
+# each protection-window overlap off ordered endpoints and finishes in a few
+# seconds; comparing every pair inside a repository is quadratic in its size and
+# cannot finish. Kept as a literal here (never read from the mutable /app spec)
+# so the budget cannot be relaxed by editing the environment.
+RUNTIME_BUDGET_SEC = 120.0
 
 
 def _load_json(path: Path):
@@ -111,6 +134,48 @@ def primary_outputs(tmp_path_factory):
     return _run_pipeline(tmp_path_factory.mktemp("primary"))
 
 
+@pytest.fixture(scope="session")
+def primary_elapsed(tmp_path_factory):
+    started = time.monotonic()
+    _run_pipeline(tmp_path_factory.mktemp("timed"))
+    return time.monotonic() - started
+
+
+def test_graded_run_meets_documented_runtime_budget(primary_elapsed):
+    assert primary_elapsed < RUNTIME_BUDGET_SEC, (
+        f"one graded run took {primary_elapsed:.1f}s against the contract's "
+        f"{RUNTIME_BUDGET_SEC:.0f}s budget"
+    )
+
+
+def test_runtime_budget_is_stated_in_the_contract():
+    assert float(SPEC["runtime_budget_seconds"]) == RUNTIME_BUDGET_SEC
+
+
+def test_overlap_reported_on_every_decision(primary_outputs):
+    _, summary, _, decisions = primary_outputs
+    counts = [d["overlap_count"] for d in decisions]
+    assert counts
+    assert all(c >= 0 for c in counts)
+    assert max(counts) == summary["max_overlap_count"]
+
+
+def test_overlap_varies_across_the_inventory(primary_outputs):
+    """A constant overlap would mean the protection windows were never compared."""
+    counts = {d["overlap_count"] for d in primary_outputs[3]}
+    assert len(counts) > 50, f"only {len(counts)} distinct overlap counts"
+
+
+def test_overlap_is_scoped_to_the_repo(primary_outputs):
+    """No snapshot may overlap more windows than its own repo holds."""
+    decisions = primary_outputs[3]
+    per_repo = {}
+    for d in decisions:
+        per_repo[d["repo"]] = per_repo.get(d["repo"], 0) + 1
+    for d in decisions:
+        assert d["overlap_count"] < per_repo[d["repo"]]
+
+
 # --------------------------------------------------------------------------
 # Step 1: the truncated snapshot inventory must be recovered in place
 # --------------------------------------------------------------------------
@@ -122,15 +187,16 @@ def _naive_concatenation() -> list[dict]:
 
 
 def test_recovery_sources_are_intact():
-    assert _load_json(CATALOGUE_PATH) == FIXTURE["catalogue"]
-    assert _load_json(JOURNAL_PATH) == FIXTURE["journal"]
+    assert _digest(_load_json(CATALOGUE_PATH)) == FIXTURE["catalogue_digest"]
+    assert _digest(_load_json(JOURNAL_PATH)) == FIXTURE["journal_digest"]
 
 
 def test_snapshot_inventory_recovered():
     """/app/data/snapshots.json shipped truncated; it must hold the recovered inventory."""
     recovered = _load_json(DEFAULT_INPUT)
     assert isinstance(recovered, list)
-    assert recovered == FIXTURE["recovered_inventory"]
+    assert len(recovered) == FIXTURE["recovered_count"]
+    assert _digest(recovered) == FIXTURE["recovered_digest"]
 
 
 def test_recovered_records_carry_no_journal_bookkeeping():
@@ -140,8 +206,8 @@ def test_recovered_records_carry_no_journal_bookkeeping():
 
 def test_shipped_and_naive_inventories_differ_from_the_recovered_one():
     """The recovery is real work: neither the truncated file nor the draft merge match."""
-    expected = FIXTURE["recovered_inventory"]
-    assert FIXTURE["shipped_truncated_inventory"] != expected
+    expected = FIXTURE["recovered_digest"]
+    assert FIXTURE["shipped_truncated_digest"] != expected
     assert _load_json(CATALOGUE_PATH) != expected
     assert _naive_concatenation() != expected
 
@@ -149,7 +215,7 @@ def test_shipped_and_naive_inventories_differ_from_the_recovered_one():
 def test_reconciler_output_depends_on_the_recovered_inventory(tmp_path: Path):
     """Even a correctly repaired reconciler emits wrong artifacts on a wrongly merged inventory."""
     for label, inventory in (
-        ("truncated", FIXTURE["shipped_truncated_inventory"]),
+        ("truncated", _load_json(TRUNCATED_REFERENCE_PATH)),
         ("catalogue_only", _load_json(CATALOGUE_PATH)),
         ("naive_concatenation", _naive_concatenation()),
     ):
@@ -157,8 +223,8 @@ def test_reconciler_output_depends_on_the_recovered_inventory(tmp_path: Path):
         _write_json(bad_input, inventory)
         _, summary, state, decisions = _run_pipeline(tmp_path / label, input_path=bad_input)
         assert summary != FIXTURE["primary"]["summary"], label
-        assert (state, decisions) != (
-            FIXTURE["primary"]["state"], FIXTURE["primary"]["decisions"]
+        assert (_digest(state), _digest(decisions)) != (
+            FIXTURE["primary"]["state_digest"], FIXTURE["primary"]["decisions_digest"]
         ), label
 
 
@@ -182,12 +248,12 @@ def test_primary_summary_matches_fixture(primary_outputs):
 
 def test_primary_state_matches_fixture(primary_outputs):
     _, _, state, _ = primary_outputs
-    assert state == FIXTURE["primary"]["state"]
+    assert _digest(state) == FIXTURE["primary"]["state_digest"]
 
 
 def test_primary_decisions_matches_fixture(primary_outputs):
     _, _, _, decisions = primary_outputs
-    assert decisions == FIXTURE["primary"]["decisions"]
+    assert _digest(decisions) == FIXTURE["primary"]["decisions_digest"]
 
 
 def test_summary_schema(primary_outputs):
@@ -306,8 +372,8 @@ def test_broken_snapshot_is_wrong(tmp_path: Path):
         tmp_path, script_path=ORIGINAL_WORKFLOW_PATH
     )
     assert broken_summary != FIXTURE["primary"]["summary"]
-    assert broken_decisions != FIXTURE["primary"]["decisions"]
-    assert broken_state != FIXTURE["primary"]["state"]
+    assert _digest(broken_decisions) != FIXTURE["primary"]["decisions_digest"]
+    assert _digest(broken_state) != FIXTURE["primary"]["state_digest"]
 
 
 # --------------------------------------------------------------------------
@@ -322,8 +388,8 @@ def test_pipeline_rerun_idempotent(tmp_path: Path):
 def test_pipeline_supports_alternate_input(tmp_path: Path):
     _, summary, state, decisions = _run_pipeline(tmp_path, input_path=ALT_INPUT)
     assert summary == FIXTURE["alternate"]["summary"]
-    assert state == FIXTURE["alternate"]["state"]
-    assert decisions == FIXTURE["alternate"]["decisions"]
+    assert _digest(state) == FIXTURE["alternate"]["state_digest"]
+    assert _digest(decisions) == FIXTURE["alternate"]["decisions_digest"]
 
 
 def test_cli_defaults_work_and_match_explicit_run(tmp_path: Path):

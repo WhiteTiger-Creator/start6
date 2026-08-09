@@ -24,20 +24,37 @@ SNAPSHOT_FIELDS = ("snapshot_id", "repo", "vault", "ts", "size_bytes", "pinned",
 
 
 def recover(catalogue: list[dict], journal: list[dict]) -> list[dict]:
-    inventory = [dict(record) for record in catalogue]
+    """Replay the journal onto the catalogue.
+
+    The position of the FIRST record carrying each snapshot_id is indexed once,
+    so an append overwrites in place without rescanning the inventory and a
+    retract is applied as a single filtering pass at the end. Rescanning the
+    whole inventory per journal entry is quadratic at catalogue scale.
+    """
+    inventory: list[dict | None] = [dict(record) for record in catalogue]
+    first: dict[str, int] = {}
+    for index, record in enumerate(inventory):
+        first.setdefault(record["snapshot_id"], index)
+
+    retracted: set[str] = set()
     for entry in sorted(journal, key=lambda e: e["journal_seq"]):
         snapshot_id = entry["snapshot_id"]
         if entry["journal_op"] == "retract":
-            inventory = [r for r in inventory if r["snapshot_id"] != snapshot_id]
+            retracted.add(snapshot_id)
+            for index, existing in enumerate(inventory):
+                if existing is not None and existing["snapshot_id"] == snapshot_id:
+                    inventory[index] = None
+            first.pop(snapshot_id, None)
             continue
+        retracted.discard(snapshot_id)
         record = {field: entry[field] for field in SNAPSHOT_FIELDS}
-        for index, existing in enumerate(inventory):
-            if existing["snapshot_id"] == snapshot_id:
-                inventory[index] = record
-                break
+        index = first.get(snapshot_id)
+        if index is not None:
+            inventory[index] = record
         else:
+            first[snapshot_id] = len(inventory)
             inventory.append(record)
-    return inventory
+    return [record for record in inventory if record is not None]
 
 
 def main() -> None:

@@ -23,6 +23,7 @@ calendar dialect or an unnecessary delegation, and are rejected by the verifier.
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 from pathlib import Path
 
@@ -52,6 +53,7 @@ QUOTA_QUANTUM = 1048576     # #RET-7162: bytes per quota unit (MiB), size_mb = C
 # Baseline retention policy (#RET-7150). Any field the policy file omits keeps
 # these values; the policy file may override per default and per repo.
 POLICY_FIELDS = (
+    "protection_days",
     "cap_daily",
     "cap_weekly",
     "cap_monthly",
@@ -60,12 +62,13 @@ POLICY_FIELDS = (
     "prune_cap",
 )
 POLICY_BASELINE = {
+    "protection_days": 21,
     "cap_daily": 7,
     "cap_weekly": 4,
     "cap_monthly": 6,
     "cap_yearly": 2,
     "quota_cap": 100000,
-    "prune_cap": 3,
+    "prune_cap": 4200,
 }
 
 RECOGNIZED_HOLDS = ("compliance", "legal", "manual")  # #RET-7124
@@ -265,6 +268,29 @@ def apply_ledger(kept_rows: list[dict], quota_cap: int) -> None:
 # --------------------------------------------------------------------------
 # Policy resolution (#RET-7150, #RET-7152)
 # --------------------------------------------------------------------------
+def overlap_counts(repo_rows: list[dict], protection_days: int) -> dict[str, int]:
+    """#RET-7172: how many other snapshots of this repo hold an intersecting
+    protection window.
+
+    Window ends are sorted once and each snapshot's count is read off by
+    position, so the whole repo costs O(n log n). Comparing every pair inside a
+    repo is quadratic in the repo's size and cannot meet the runtime budget.
+    """
+    span = protection_days * 86400
+    starts = sorted(r["ts"] for r in repo_rows)
+    ends = sorted(r["ts"] + span for r in repo_rows)
+    counts: dict[str, int] = {}
+    for row in repo_rows:
+        start = row["ts"]
+        end = start + span
+        # windows are [ts, ts + span] inclusive: j intersects i when
+        # start_j <= end_i and end_j >= start_i
+        began_by_end = bisect.bisect_right(starts, end)
+        ended_before = bisect.bisect_left(ends, start)
+        counts[row["snapshot_id"]] = began_by_end - ended_before - 1
+    return counts
+
+
 def resolve_policy(repo: str, policy_data: dict) -> dict:
     resolved = dict(POLICY_BASELINE)
     for field, val in policy_data.get("default", {}).items():
@@ -281,7 +307,7 @@ def resolve_policy(repo: str, policy_data: dict) -> dict:
 DECISION_FIELDS = (
     "snapshot_id", "repo", "vault", "ts", "size_bytes", "size_mb", "pinned", "held",
     "hold", "daily_bucket", "weekly_bucket", "monthly_bucket", "yearly_bucket",
-    "roles", "decision", "idle_gap", "carry_in", "used_quota",
+    "roles", "decision", "idle_gap", "carry_in", "used_quota", "overlap_count",
 )
 
 
@@ -324,6 +350,12 @@ def run(input_path: str, output_dir: str) -> None:
             selected_bucket_count += len(info["roles"])
 
     kept_ids = set(keep_meta)
+
+    # --- protection-window overlap per repo (#RET-7172) ---
+    overlap_lookup: dict[str, int] = {}
+    for repo in sorted(by_repo):
+        policy = resolve_policy(repo, policy_data)
+        overlap_lookup.update(overlap_counts(by_repo[repo], policy["protection_days"]))
 
     # --- Stage 6: prune ordering + per-repo prune cap (#RET-7145, #RET-7146) ---
     prune_decision: dict[str, str] = {}
@@ -377,6 +409,7 @@ def run(input_path: str, output_dir: str) -> None:
             "idle_gap": idle_gap,
             "carry_in": carry_in,
             "used_quota": used_quota,
+            "overlap_count": overlap_lookup[row["snapshot_id"]],
         }
         decisions.append(rec)
 
@@ -414,6 +447,7 @@ def run(input_path: str, output_dir: str) -> None:
         "reclaimed_size_bytes": pruned_size,
         "deferred_size_bytes": deferred_size,
         "max_quota_used": max_quota,
+        "max_overlap_count": max((d["overlap_count"] for d in decisions), default=0),
     }
 
     # --- retention_state.json: object keyed by repo ---

@@ -230,7 +230,7 @@ Reviewers should reconcile behaviour questions against #RET governance decisions
 
 ### Review entry 1049 — vault/redis repo
 Shift lead logged a routine observation for vault/redis during retention window 1049. Vendor ticket on backup-agent retries closed; catalog delivery within the contractual budget.
-> **Governance decision (2026-05-18 - #RET-7150)** Priya: retention policy baseline (read from /app/data/retention_policy.json at that fixed absolute path; --input never relocates it). Any field the policy file omits keeps its baseline: cap_daily=7; cap_weekly=4; cap_monthly=6; cap_yearly=2; quota_cap=100000; prune_cap=3
+> **Governance decision (2026-05-18 - #RET-7150)** Priya: retention policy baseline (read from /app/data/retention_policy.json at that fixed absolute path; --input never relocates it). Any field the policy file omits keeps its baseline: cap_daily=7; cap_weekly=4; cap_monthly=6; cap_yearly=2; quota_cap=100000; prune_cap=4200; protection_days=21
 Thread archived; see the #RET decision entries for anything affecting reconciler behaviour.
 
 ### Review entry 1050 — media/assets repo
@@ -434,3 +434,5 @@ Historical tape indices remain archived and non-authoritative for the JSON recon
 ### Review entry 1099 — vault/obj repo
 Shift lead logged a routine observation for vault/obj during retention window 1099. Vendor ticket on backup-agent retries closed; catalog delivery within the contractual budget.
 No reconciler semantics changed in this entry; parameters remain as approved by the governance board.
+
+> **Governance decision (2026-06-04 - #RET-7172)** Lena: protection-window overlap reporting, final. Every canonical snapshot holds a protection window running from its ts to ts + protection_days x 86400 inclusive, with protection_days the repo's RESOLVED policy value. Each retention decision carries `overlap_count`: how many OTHER canonical snapshots OF THE SAME REPO hold a window that intersects this one, where windows touching at an endpoint do intersect. A snapshot never counts itself, snapshots of other repos never count, and a record the de-duplication chain discarded never counts. The summary carries `max_overlap_count` over every decision. This settles the #RET-7118 draft, which counted only snapshots sharing a calendar bucket

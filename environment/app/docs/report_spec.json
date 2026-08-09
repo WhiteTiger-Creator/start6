@@ -9,7 +9,15 @@
       "pin_registry": "/app/data/pin_registry.json"
     },
     "prohibited_imports": [
-      "pandas", "numpy", "dateutil", "arrow", "pendulum", "pytz", "datetime", "calendar", "zoneinfo"
+      "pandas",
+      "numpy",
+      "dateutil",
+      "arrow",
+      "pendulum",
+      "pytz",
+      "datetime",
+      "calendar",
+      "zoneinfo"
     ]
   },
   "output_files": {
@@ -19,9 +27,15 @@
     "additional_files_allowed": false
   },
   "field_types": {
-    "snapshot_id": {"type": "string"},
-    "repo": {"type": "string"},
-    "vault": {"type": "string"},
+    "snapshot_id": {
+      "type": "string"
+    },
+    "repo": {
+      "type": "string"
+    },
+    "vault": {
+      "type": "string"
+    },
     "ts": {
       "type": "integer",
       "unit": "epoch_seconds",
@@ -35,30 +49,99 @@
       "type": "boolean",
       "input_coercion": "booleans unchanged; strings true/1/yes/pinned after str(...).strip().lower() -> true; other strings -> false; other types -> bool(value)"
     },
-    "size_mb": {"type": "integer"},
-    "held": {"type": "boolean"},
-    "hold": {"type": "string", "enum": ["", "flag", "compliance", "legal", "manual"]},
-    "daily_bucket": {"type": "integer"},
-    "weekly_bucket": {"type": "integer"},
-    "monthly_bucket": {"type": "integer"},
-    "yearly_bucket": {"type": "integer"},
-    "idle_gap": {"type": "integer"},
-    "carry_in": {"type": "integer"},
-    "used_quota": {"type": "integer"},
-    "decision": {"type": "string", "enum": ["keep", "prune", "defer"]},
-    "decision_counts": {"type": "object", "keys": ["keep", "prune", "defer"]},
+    "size_mb": {
+      "type": "integer"
+    },
+    "held": {
+      "type": "boolean"
+    },
+    "hold": {
+      "type": "string",
+      "enum": [
+        "",
+        "flag",
+        "compliance",
+        "legal",
+        "manual"
+      ]
+    },
+    "daily_bucket": {
+      "type": "integer"
+    },
+    "weekly_bucket": {
+      "type": "integer"
+    },
+    "monthly_bucket": {
+      "type": "integer"
+    },
+    "yearly_bucket": {
+      "type": "integer"
+    },
+    "idle_gap": {
+      "type": "integer"
+    },
+    "carry_in": {
+      "type": "integer"
+    },
+    "used_quota": {
+      "type": "integer"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "keep",
+        "prune",
+        "defer"
+      ]
+    },
+    "decision_counts": {
+      "type": "object",
+      "keys": [
+        "keep",
+        "prune",
+        "defer"
+      ]
+    },
     "roles": {
       "type": "array",
-      "items": {"type": "string", "enum": ["daily", "weekly", "monthly", "yearly", "pinned"]}
+      "items": {
+        "type": "string",
+        "enum": [
+          "daily",
+          "weekly",
+          "monthly",
+          "yearly",
+          "pinned"
+        ]
+      }
+    },
+    "overlap_count": {
+      "type": "integer"
     }
   },
   "retention_decisions_jsonl": {
     "output_path": "retention_decisions.jsonl",
     "container": "one compact JSON object per line, json.dumps(..., separators=(',', ':'))",
     "required_fields": [
-      "snapshot_id", "repo", "vault", "ts", "size_bytes", "size_mb", "pinned", "held",
-      "hold", "daily_bucket", "weekly_bucket", "monthly_bucket", "yearly_bucket",
-      "roles", "decision", "idle_gap", "carry_in", "used_quota"
+      "snapshot_id",
+      "repo",
+      "vault",
+      "ts",
+      "size_bytes",
+      "size_mb",
+      "pinned",
+      "held",
+      "hold",
+      "daily_bucket",
+      "weekly_bucket",
+      "monthly_bucket",
+      "yearly_bucket",
+      "roles",
+      "decision",
+      "idle_gap",
+      "carry_in",
+      "used_quota",
+      "overlap_count"
     ]
   },
   "retention_state_json": {
@@ -66,16 +149,46 @@
     "container": "object keyed by normalized repo, each value an object with the keys below",
     "key_sort": "ascending",
     "required_fields": [
-      "daily", "weekly", "monthly", "yearly", "pinned", "kept_count", "quota_used"
+      "daily",
+      "weekly",
+      "monthly",
+      "yearly",
+      "pinned",
+      "kept_count",
+      "quota_used"
     ],
     "value_types": {
-      "daily": {"type": "array", "items": "snapshot_id", "order": "ascending"},
-      "weekly": {"type": "array", "items": "snapshot_id", "order": "ascending"},
-      "monthly": {"type": "array", "items": "snapshot_id", "order": "ascending"},
-      "yearly": {"type": "array", "items": "snapshot_id", "order": "ascending"},
-      "pinned": {"type": "array", "items": "snapshot_id", "order": "ascending"},
-      "kept_count": {"type": "integer"},
-      "quota_used": {"type": "integer"}
+      "daily": {
+        "type": "array",
+        "items": "snapshot_id",
+        "order": "ascending"
+      },
+      "weekly": {
+        "type": "array",
+        "items": "snapshot_id",
+        "order": "ascending"
+      },
+      "monthly": {
+        "type": "array",
+        "items": "snapshot_id",
+        "order": "ascending"
+      },
+      "yearly": {
+        "type": "array",
+        "items": "snapshot_id",
+        "order": "ascending"
+      },
+      "pinned": {
+        "type": "array",
+        "items": "snapshot_id",
+        "order": "ascending"
+      },
+      "kept_count": {
+        "type": "integer"
+      },
+      "quota_used": {
+        "type": "integer"
+      }
     }
   },
   "summary_json": {
@@ -83,20 +196,45 @@
     "container": "object",
     "schema_version": "retention-gfs-v1",
     "required_fields": [
-      "schema_version", "raw_snapshot_count", "unique_snapshot_ids", "canonical_snapshot_count",
-      "repo_count", "held_count", "decision_counts", "kept_count", "pruned_count",
-      "deferred_count", "selected_bucket_count", "total_size_bytes", "kept_size_bytes",
-      "reclaimed_size_bytes", "deferred_size_bytes", "max_quota_used"
+      "schema_version",
+      "raw_snapshot_count",
+      "unique_snapshot_ids",
+      "canonical_snapshot_count",
+      "repo_count",
+      "held_count",
+      "decision_counts",
+      "kept_count",
+      "pruned_count",
+      "deferred_count",
+      "selected_bucket_count",
+      "total_size_bytes",
+      "kept_size_bytes",
+      "reclaimed_size_bytes",
+      "deferred_size_bytes",
+      "max_quota_used",
+      "max_overlap_count"
     ],
-    "decision_counts_key_order": ["keep", "prune", "defer"]
+    "decision_counts_key_order": [
+      "keep",
+      "prune",
+      "defer"
+    ]
   },
   "policy_source": {
     "path": "/app/data/retention_policy.json",
     "shape": "{\"default\": {field: int, ...}, \"repo_overrides\": {repo: {field: int, ...}, ...}}",
-    "fields": ["cap_daily", "cap_weekly", "cap_monthly", "cap_yearly", "quota_cap", "prune_cap"]
+    "fields": [
+      "cap_daily",
+      "cap_weekly",
+      "cap_monthly",
+      "cap_yearly",
+      "quota_cap",
+      "prune_cap"
+    ]
   },
   "pin_registry_source": {
     "path": "/app/data/pin_registry.json",
     "shape": "[{\"repo\": str, \"snapshot_id\": str, \"hold\": str, \"note\": str}, ...]"
-  }
+  },
+  "runtime_budget_seconds": 120
 }

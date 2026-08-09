@@ -4,11 +4,19 @@
     "cap_weekly": 3,
     "cap_monthly": 4,
     "cap_yearly": 2,
-    "prune_cap": 3
+    "prune_cap": 4200,
+    "protection_days": 21
   },
   "repo_overrides": {
     "vault/pg": {
-      "cap_daily": 2
+      "cap_daily": 2,
+      "protection_days": 9
+    },
+    "vault/kafka": {
+      "protection_days": 34
+    },
+    "vault/redis": {
+      "prune_cap": 2600
     }
   }
 }

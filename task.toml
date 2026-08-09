@@ -5,6 +5,12 @@ name = "backup-retention-reconciler"
 author_name = "Jonathan"
 author_email = "jtolbert0175@gmail.com"
 difficulty_explanation = '''
+The graded inventory holds tens of thousands of snapshots per repository, and the board's
+protection-window overlap report must be read off ordered window endpoints: comparing every pair inside a
+repository is quadratic in its size and cannot finish inside the 120-second wall-clock budget the contract
+states. The recovery has the same shape -- the journal must be replayed against an indexed inventory rather
+than by rescanning it per entry.
+
 Restoring this reconciler is the work of a storage-platform or backup/DR engineer responding to a
 botched rollout, and it is a genuinely dependent chain rather than a single repair. The rollout
 truncated the authoritative snapshot inventory, so the first step is to rebuild
