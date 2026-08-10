@@ -36,17 +36,14 @@ def recover(catalogue: list[dict], journal: list[dict]) -> list[dict]:
     for index, record in enumerate(inventory):
         first.setdefault(record["snapshot_id"], index)
 
-    retracted: set[str] = set()
     for entry in sorted(journal, key=lambda e: e["journal_seq"]):
         snapshot_id = entry["snapshot_id"]
         if entry["journal_op"] == "retract":
-            retracted.add(snapshot_id)
             for index, existing in enumerate(inventory):
                 if existing is not None and existing["snapshot_id"] == snapshot_id:
                     inventory[index] = None
             first.pop(snapshot_id, None)
             continue
-        retracted.discard(snapshot_id)
         record = {field: entry[field] for field in SNAPSHOT_FIELDS}
         index = first.get(snapshot_id)
         if index is not None:
