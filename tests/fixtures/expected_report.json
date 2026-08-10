@@ -1,26 +1,26 @@
 {
   "alternate": {
     "decision_count": 78000,
-    "decisions_digest": "83a005630b211bcf3a05c096d277e6ad01d9db7624d43c10b5f22a7a00dcef29",
+    "decisions_digest": "c58e01108e880968f6d5cfe5145733858ee5853083f32a46f5c4f88f8099eebe",
     "state_digest": "e7ed0bf5d8158322fa3a2e303cf00f17980379975fe252eb4783df29b625b884",
     "summary": {
       "canonical_snapshot_count": 78000,
       "decision_counts": {
-        "defer": 53463,
+        "defer": 71463,
         "keep": 5137,
-        "prune": 19400
+        "prune": 1400
       },
-      "deferred_count": 53463,
-      "deferred_size_bytes": 187300667000000,
+      "deferred_count": 71463,
+      "deferred_size_bytes": 324080476000000,
       "held_count": 5078,
       "kept_count": 5137,
       "kept_size_bytes": 23467035000000,
       "max_overlap_count": 2091,
       "max_peak_depth": 1062,
       "max_quota_used": 100000,
-      "pruned_count": 19400,
+      "pruned_count": 1400,
       "raw_snapshot_count": 78900,
-      "reclaimed_size_bytes": 147757474000000,
+      "reclaimed_size_bytes": 10977665000000,
       "repo_count": 5,
       "schema_version": "retention-gfs-v1",
       "selected_bucket_count": 67,
@@ -33,26 +33,26 @@
   "journal_digest": "08581a091fbb7d681d20db1b42cbe898f4feca4a4cb3d2d021583a6781bb0e3d",
   "primary": {
     "decision_count": 78000,
-    "decisions_digest": "f1377c96927e541b92a69dc31d36c47d32402f27b32857a116143a9045bb91e4",
+    "decisions_digest": "5cfd087949feae8841dc28866456334b727847eb294881c2e9cf66837f08a165",
     "state_digest": "2b733126bb9b64e674102a0ed604442c3e4782f4c55a0441eb2dc971461842c9",
     "summary": {
       "canonical_snapshot_count": 78000,
       "decision_counts": {
-        "defer": 53536,
+        "defer": 71536,
         "keep": 5064,
-        "prune": 19400
+        "prune": 1400
       },
-      "deferred_count": 53536,
-      "deferred_size_bytes": 188178042000000,
+      "deferred_count": 71536,
+      "deferred_size_bytes": 325271021000000,
       "held_count": 5006,
       "kept_count": 5064,
       "kept_size_bytes": 23192277000000,
       "max_overlap_count": 2106,
       "max_peak_depth": 1085,
       "max_quota_used": 100000,
-      "pruned_count": 19400,
+      "pruned_count": 1400,
       "raw_snapshot_count": 78900,
-      "reclaimed_size_bytes": 148082701000000,
+      "reclaimed_size_bytes": 10989722000000,
       "repo_count": 5,
       "schema_version": "retention-gfs-v1",
       "selected_bucket_count": 67,

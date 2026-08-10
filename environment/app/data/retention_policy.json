@@ -1,22 +1,22 @@
 {
   "default": {
     "cap_daily": 5,
-    "cap_weekly": 3,
     "cap_monthly": 4,
+    "cap_weekly": 3,
     "cap_yearly": 2,
-    "prune_cap": 4200,
-    "protection_days": 21
+    "protection_days": 21,
+    "prune_cap": 300
   },
   "repo_overrides": {
+    "vault/kafka": {
+      "protection_days": 34
+    },
     "vault/pg": {
       "cap_daily": 2,
       "protection_days": 9
     },
-    "vault/kafka": {
-      "protection_days": 34
-    },
     "vault/redis": {
-      "prune_cap": 2600
+      "prune_cap": 200
     }
   }
 }

@@ -68,7 +68,7 @@ POLICY_BASELINE = {
     "cap_monthly": 6,
     "cap_yearly": 2,
     "quota_cap": 100000,
-    "prune_cap": 4200,
+    "prune_cap": 300,
 }
 
 RECOGNIZED_HOLDS = ("compliance", "legal", "manual")  # #RET-7124
@@ -352,6 +352,94 @@ def peak_depths(repo_rows: list[dict], protection_days: int) -> dict[str, int]:
     return peaks
 
 
+def chain_segments(repo_rows: list[dict], kept_ids: set) -> list[list[dict]]:
+    """The prunable runs of one repo, in the order the tie-break walks them.
+
+    Inside a vault the snapshots are one incremental chain in time order, and a
+    kept snapshot re-anchors it. So the candidates between two kept snapshots
+    form a run whose members can only be dropped from the newest end backwards:
+    deleting a snapshot that a later one still builds on would leave the later
+    one unrestorable.
+    """
+    by_vault: dict[str, list[dict]] = {}
+    for row in repo_rows:
+        by_vault.setdefault(row["vault"], []).append(row)
+
+    segments: list[list[dict]] = []
+    for vault in sorted(by_vault):
+        run: list[dict] = []
+        for row in sorted(by_vault[vault], key=lambda r: (r["ts"], r["snapshot_id"])):
+            if row["snapshot_id"] in kept_ids:
+                if run:
+                    segments.append(run)
+                    run = []
+            else:
+                run.append(row)
+        if run:
+            segments.append(run)
+    segments.sort(key=lambda seg: (seg[0]["vault"], seg[0]["ts"], seg[0]["snapshot_id"]))
+    return segments
+
+
+def select_pruned(segments: list[list[dict]], cap: int) -> set:
+    """#RET-7184: the most bytes the cap can reclaim without breaking a chain.
+
+    Each run contributes a suffix of itself, so the cycle is choosing how deep
+    to cut into each of them at once rather than picking snapshots one by one.
+    Taking the largest candidates wherever they sit breaks the chains, and
+    taking whole runs in order of bytes per snapshot stays legal but stops
+    short of what the cap could have reclaimed. The choice is made once over
+    every run together, maximising reclaimed bytes, then the fewest snapshots,
+    with the earliest run giving way first where two plans are still level.
+    """
+    if cap <= 0 or not segments:
+        return set()
+
+    # suffix_bytes[i][j] is what dropping the newest j of run i reclaims.
+    suffix_bytes: list[list[int]] = []
+    for segment in segments:
+        running, sums = 0, [0]
+        for row in reversed(segment):
+            running += int(row["size_bytes"])
+            sums.append(running)
+        suffix_bytes.append(sums)
+
+    # Reclaimed bytes dominate; the snapshot count breaks a tie by being
+    # smaller, so both keys ride in one integer and the search stays exact.
+    unit = cap + 1
+    rows: list[list[int]] = [[0] * (cap + 1) for _ in range(len(segments) + 1)]
+    for index in range(len(segments) - 1, -1, -1):
+        sums = suffix_bytes[index]
+        here, nxt = rows[index], rows[index + 1]
+        reach = len(sums) - 1
+        for capacity in range(cap + 1):
+            best = nxt[capacity]
+            limit = min(capacity, reach)
+            for take in range(1, limit + 1):
+                value = nxt[capacity - take] + sums[take] * unit - take
+                best = max(best, value)
+            here[capacity] = best
+
+    pruned: set = set()
+    capacity = cap
+    for index, segment in enumerate(segments):
+        sums = suffix_bytes[index]
+        reach = len(sums) - 1
+        limit = min(capacity, reach)
+        target = rows[index][capacity]
+        chosen = 0
+        if rows[index + 1][capacity] != target:
+            for take in range(1, limit + 1):
+                if rows[index + 1][capacity - take] + sums[take] * unit - take == target:
+                    chosen = take
+                    break
+        if chosen:
+            for row in segment[len(segment) - chosen:]:
+                pruned.add(row["snapshot_id"])
+            capacity -= chosen
+    return pruned
+
+
 def resolve_policy(repo: str, policy_data: dict) -> dict:
     resolved = dict(POLICY_BASELINE)
     for field, val in policy_data.get("default", {}).items():
@@ -421,15 +509,16 @@ def run(input_path: str, output_dir: str) -> None:
         overlap_lookup.update(overlap_counts(by_repo[repo], policy["protection_days"]))
         depth_lookup.update(peak_depths(by_repo[repo], policy["protection_days"]))
 
-    # --- Stage 6: prune ordering + per-repo prune cap (#RET-7145, #RET-7146) ---
+    # --- Stage 6: chain-closed prune selection (#RET-7184, cap from #RET-7146) ---
     prune_decision: dict[str, str] = {}
     for repo in sorted(by_repo):
         policy = resolve_policy(repo, policy_data)
-        candidates = [r for r in by_repo[repo] if r["snapshot_id"] not in kept_ids]
-        candidates.sort(key=lambda r: (-r["size_bytes"], r["ts"], r["snapshot_id"]))
-        cap = max(policy["prune_cap"], 0)
-        for idx, row in enumerate(candidates):
-            prune_decision[row["snapshot_id"]] = "prune" if idx < cap else "defer"
+        segments = chain_segments(by_repo[repo], kept_ids)
+        pruned = select_pruned(segments, max(policy["prune_cap"], 0))
+        for segment in segments:
+            for row in segment:
+                sid = row["snapshot_id"]
+                prune_decision[sid] = "prune" if sid in pruned else "defer"
 
     # --- assemble one decision record per canonical snapshot ---
     ledger_lookup = {r["snapshot_id"]: r for r in kept_rows}

@@ -42,7 +42,7 @@ POLICY_FIELDS = ("protection_days", "cap_daily", "cap_weekly", "cap_monthly",
 BASELINE = {
     "protection_days": 21,
     "cap_daily": 7, "cap_weekly": 4, "cap_monthly": 6, "cap_yearly": 2,
-    "quota_cap": 100000, "prune_cap": 4200,
+    "quota_cap": 100000, "prune_cap": 300,
 }
 SNAPSHOT_FIELDS = ("snapshot_id", "repo", "vault", "ts", "size_bytes", "pinned", "note")
 
@@ -496,6 +496,150 @@ def test_promotion_union_present(primary_outputs):
 # --------------------------------------------------------------------------
 # Original / broken snapshot
 # --------------------------------------------------------------------------
+def _repo_runs(decisions: list[dict]) -> dict[str, list[list[dict]]]:
+    """Rebuild the prunable runs from the graded decision rows.
+
+    A run is the stretch of non-kept snapshots between two kept ones inside a
+    vault, oldest first. Derived here from the agent's own output rather than
+    from any reference, so these checks stay honest if the reference changes.
+    """
+    by_repo_vault: dict[tuple[str, str], list[dict]] = {}
+    for row in decisions:
+        by_repo_vault.setdefault((row["repo"], row["vault"]), []).append(row)
+    runs: dict[str, list[list[dict]]] = {}
+    for (repo, _vault), rows in by_repo_vault.items():
+        rows.sort(key=lambda r: (r["ts"], r["snapshot_id"]))
+        current: list[dict] = []
+        for row in rows:
+            if row["decision"] == "keep":
+                if current:
+                    runs.setdefault(repo, []).append(current)
+                    current = []
+            else:
+                current.append(row)
+        if current:
+            runs.setdefault(repo, []).append(current)
+    return runs
+
+
+def test_pruning_never_breaks_an_incremental_chain(primary_outputs):
+    """Within a run, what is pruned must be a suffix, newest end first.
+
+    A later snapshot builds on the one before it, so a pruned snapshot with a
+    deferred snapshot after it in the same run would leave that one
+    unrestorable. This is the constraint the size-ordered selection ignores.
+    """
+    _, _, _, decisions = primary_outputs
+    checked = 0
+    for repo, runs in _repo_runs(decisions).items():
+        for run in runs:
+            flags = [row["decision"] == "prune" for row in run]
+            assert flags == sorted(flags), (
+                f"{repo}: a pruned snapshot is followed by a deferred one in the same run"
+            )
+            checked += 1
+    assert checked > 100, f"only {checked} runs were examined"
+
+
+def test_prune_cap_is_respected_per_repo(primary_outputs):
+    """No repo prunes more than its resolved cap allows."""
+    _, _, _, decisions = primary_outputs
+    policy_data = _load_json(POLICY_PATH)
+    per_repo: dict[str, int] = {}
+    for row in decisions:
+        if row["decision"] == "prune":
+            per_repo[row["repo"]] = per_repo.get(row["repo"], 0) + 1
+    assert per_repo, "nothing was pruned at all"
+    for repo, count in per_repo.items():
+        assert count <= _resolve(repo, policy_data)["prune_cap"], repo
+
+
+def _best_reclaim(runs: list[list[dict]], cap: int) -> int:
+    """Most bytes the cap can reclaim from these runs, recomputed here.
+
+    A plain forward table over the runs, which is a different formulation from
+    anything the pipeline can be doing, so agreement is evidence rather than
+    the same routine twice.
+    """
+    best = [0] * (cap + 1)
+    for run in runs:
+        sums, running = [0], 0
+        for row in reversed(run):
+            running += int(row["size_bytes"])
+            sums.append(running)
+        nxt = list(best)
+        for capacity in range(cap + 1):
+            for take in range(1, min(len(sums) - 1, capacity) + 1):
+                value = best[capacity - take] + sums[take]
+                nxt[capacity] = max(nxt[capacity], value)
+        best = nxt
+    return best[cap]
+
+
+def test_prune_selection_reclaims_the_most_the_cap_allows(primary_outputs):
+    """The reclaimed bytes must equal the attainable optimum, per repo."""
+    _, _, _, decisions = primary_outputs
+    policy_data = _load_json(POLICY_PATH)
+    runs_by_repo = _repo_runs(decisions)
+    reclaimed: dict[str, int] = {}
+    for row in decisions:
+        if row["decision"] == "prune":
+            reclaimed[row["repo"]] = reclaimed.get(row["repo"], 0) + int(row["size_bytes"])
+    for repo, runs in runs_by_repo.items():
+        cap = _resolve(repo, policy_data)["prune_cap"]
+        assert reclaimed.get(repo, 0) == _best_reclaim(runs, cap), repo
+
+
+def test_chain_respecting_greedy_falls_short_of_the_optimum(primary_outputs):
+    """A legal greedy really does reclaim less on this inventory.
+
+    If taking whole runs by bytes per snapshot already reached the optimum,
+    requiring the optimum would prove nothing here, so the gap is asserted.
+    """
+    _, _, _, decisions = primary_outputs
+    policy_data = _load_json(POLICY_PATH)
+    shortfalls = 0
+    for repo, runs in _repo_runs(decisions).items():
+        cap = _resolve(repo, policy_data)["prune_cap"]
+        options = []
+        for index, run in enumerate(runs):
+            running = 0
+            for depth, row in enumerate(reversed(run), start=1):
+                running += int(row["size_bytes"])
+                options.append((running / depth, depth, running, index))
+        options.sort(key=lambda option: -option[0])
+        used: set[int] = set()
+        remaining, greedy = cap, 0
+        for _density, depth, total, index in options:
+            if index in used or depth > remaining:
+                continue
+            used.add(index)
+            remaining -= depth
+            greedy += total
+        if greedy < _best_reclaim(runs, cap):
+            shortfalls += 1
+    assert shortfalls >= 3, (
+        f"the greedy selection matched the optimum on all but {shortfalls} repos"
+    )
+
+
+def test_size_ordered_selection_would_break_chains(primary_outputs):
+    """The superseded rule is not merely worse, it is infeasible.
+
+    Taking the largest candidates wherever they sit reports more reclaimed
+    bytes than is achievable, which is how a run that ignored the chains
+    announces itself.
+    """
+    _, _, _, decisions = primary_outputs
+    policy_data = _load_json(POLICY_PATH)
+    for repo, runs in _repo_runs(decisions).items():
+        cap = _resolve(repo, policy_data)["prune_cap"]
+        everything = sorted(
+            (int(row["size_bytes"]) for run in runs for row in run), reverse=True
+        )
+        assert sum(everything[:cap]) > _best_reclaim(runs, cap), repo
+
+
 def test_original_snapshot_preserved():
     """The frozen incident snapshot is left byte-identical."""
     assert ORIGINAL_WORKFLOW_PATH.exists()
