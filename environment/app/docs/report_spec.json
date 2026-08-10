@@ -1,127 +1,124 @@
 {
-  "workflow_repair": {
-    "path": "/app/workflow/reconcile_retention.py",
-    "cli_usage": "python3 /app/workflow/reconcile_retention.py --input PATH --output-dir PATH",
-    "defaults": {
-      "input": "/app/data/snapshots.json",
-      "output_dir": "/app/output",
-      "retention_policy": "/app/data/retention_policy.json",
-      "pin_registry": "/app/data/pin_registry.json"
-    },
-    "prohibited_imports": [
-      "pandas",
-      "numpy",
-      "dateutil",
-      "arrow",
-      "pendulum",
-      "pytz",
-      "datetime",
-      "calendar",
-      "zoneinfo"
-    ]
-  },
-  "output_files": {
-    "summary_json": "summary.json",
-    "retention_state_json": "retention_state.json",
-    "retention_decisions_jsonl": "retention_decisions.jsonl",
-    "additional_files_allowed": false
-  },
   "field_types": {
-    "snapshot_id": {
-      "type": "string"
-    },
-    "repo": {
-      "type": "string"
-    },
-    "vault": {
-      "type": "string"
-    },
-    "ts": {
-      "type": "integer",
-      "unit": "epoch_seconds",
-      "input_coercion": "int(str(ts).strip()); on failure int(float(str(ts).strip())); on failure 0"
-    },
-    "size_bytes": {
-      "type": "integer",
-      "input_coercion": "int(str(size_bytes).strip()); on failure int(float(str(size_bytes).strip())); on failure 0"
-    },
-    "pinned": {
-      "type": "boolean",
-      "input_coercion": "booleans unchanged; strings true/1/yes/pinned after str(...).strip().lower() -> true; other strings -> false; other types -> bool(value)"
-    },
-    "size_mb": {
+    "carry_in": {
       "type": "integer"
+    },
+    "daily_bucket": {
+      "type": "integer"
+    },
+    "decision": {
+      "enum": [
+        "keep",
+        "prune",
+        "defer"
+      ],
+      "type": "string"
+    },
+    "decision_counts": {
+      "keys": [
+        "keep",
+        "prune",
+        "defer"
+      ],
+      "type": "object"
     },
     "held": {
       "type": "boolean"
     },
     "hold": {
-      "type": "string",
       "enum": [
         "",
         "flag",
         "compliance",
         "legal",
         "manual"
-      ]
-    },
-    "daily_bucket": {
-      "type": "integer"
-    },
-    "weekly_bucket": {
-      "type": "integer"
-    },
-    "monthly_bucket": {
-      "type": "integer"
-    },
-    "yearly_bucket": {
-      "type": "integer"
+      ],
+      "type": "string"
     },
     "idle_gap": {
       "type": "integer"
     },
-    "carry_in": {
+    "max_peak_depth": "integer",
+    "monthly_bucket": {
       "type": "integer"
     },
-    "used_quota": {
+    "overlap_count": {
       "type": "integer"
     },
-    "decision": {
-      "type": "string",
-      "enum": [
-        "keep",
-        "prune",
-        "defer"
-      ]
+    "peak_depth": "integer",
+    "pinned": {
+      "input_coercion": "booleans unchanged; strings true/1/yes/pinned after str(...).strip().lower() -> true; other strings -> false; other types -> bool(value)",
+      "type": "boolean"
     },
-    "decision_counts": {
-      "type": "object",
-      "keys": [
-        "keep",
-        "prune",
-        "defer"
-      ]
+    "repo": {
+      "type": "string"
     },
     "roles": {
-      "type": "array",
       "items": {
-        "type": "string",
         "enum": [
           "daily",
           "weekly",
           "monthly",
           "yearly",
           "pinned"
-        ]
-      }
+        ],
+        "type": "string"
+      },
+      "type": "array"
     },
-    "overlap_count": {
+    "size_bytes": {
+      "input_coercion": "int(str(size_bytes).strip()); on failure int(float(str(size_bytes).strip())); on failure 0",
+      "type": "integer"
+    },
+    "size_mb": {
+      "type": "integer"
+    },
+    "snapshot_id": {
+      "type": "string"
+    },
+    "ts": {
+      "input_coercion": "int(str(ts).strip()); on failure int(float(str(ts).strip())); on failure 0",
+      "type": "integer",
+      "unit": "epoch_seconds"
+    },
+    "used_quota": {
+      "type": "integer"
+    },
+    "vault": {
+      "type": "string"
+    },
+    "weekly_bucket": {
+      "type": "integer"
+    },
+    "yearly_bucket": {
       "type": "integer"
     }
   },
+  "output_files": {
+    "additional_files_allowed": false,
+    "retention_decisions_jsonl": "retention_decisions.jsonl",
+    "retention_state_json": "retention_state.json",
+    "summary_json": "summary.json"
+  },
+  "pin_registry_source": {
+    "path": "/app/data/pin_registry.json",
+    "shape": "[{\"repo\": str, \"snapshot_id\": str, \"hold\": str, \"note\": str}, ...]"
+  },
+  "policy_source": {
+    "fields": [
+      "cap_daily",
+      "cap_weekly",
+      "cap_monthly",
+      "cap_yearly",
+      "quota_cap",
+      "prune_cap"
+    ],
+    "path": "/app/data/retention_policy.json",
+    "shape": "{\"default\": {field: int, ...}, \"repo_overrides\": {repo: {field: int, ...}, ...}}"
+  },
   "retention_decisions_jsonl": {
-    "output_path": "retention_decisions.jsonl",
     "container": "one compact JSON object per line, json.dumps(..., separators=(',', ':'))",
+    "output_path": "retention_decisions.jsonl",
     "required_fields": [
       "snapshot_id",
       "repo",
@@ -141,13 +138,14 @@
       "idle_gap",
       "carry_in",
       "used_quota",
-      "overlap_count"
+      "overlap_count",
+      "peak_depth"
     ]
   },
   "retention_state_json": {
-    "output_path": "retention_state.json",
     "container": "object keyed by normalized repo, each value an object with the keys below",
     "key_sort": "ascending",
+    "output_path": "retention_state.json",
     "required_fields": [
       "daily",
       "weekly",
@@ -159,42 +157,47 @@
     ],
     "value_types": {
       "daily": {
-        "type": "array",
         "items": "snapshot_id",
-        "order": "ascending"
-      },
-      "weekly": {
-        "type": "array",
-        "items": "snapshot_id",
-        "order": "ascending"
-      },
-      "monthly": {
-        "type": "array",
-        "items": "snapshot_id",
-        "order": "ascending"
-      },
-      "yearly": {
-        "type": "array",
-        "items": "snapshot_id",
-        "order": "ascending"
-      },
-      "pinned": {
-        "type": "array",
-        "items": "snapshot_id",
-        "order": "ascending"
+        "order": "ascending",
+        "type": "array"
       },
       "kept_count": {
         "type": "integer"
       },
+      "monthly": {
+        "items": "snapshot_id",
+        "order": "ascending",
+        "type": "array"
+      },
+      "pinned": {
+        "items": "snapshot_id",
+        "order": "ascending",
+        "type": "array"
+      },
       "quota_used": {
         "type": "integer"
+      },
+      "weekly": {
+        "items": "snapshot_id",
+        "order": "ascending",
+        "type": "array"
+      },
+      "yearly": {
+        "items": "snapshot_id",
+        "order": "ascending",
+        "type": "array"
       }
     }
   },
+  "runtime_budget_seconds": 120,
   "summary_json": {
-    "output_path": "summary.json",
     "container": "object",
-    "schema_version": "retention-gfs-v1",
+    "decision_counts_key_order": [
+      "keep",
+      "prune",
+      "defer"
+    ],
+    "output_path": "summary.json",
     "required_fields": [
       "schema_version",
       "raw_snapshot_count",
@@ -212,29 +215,30 @@
       "reclaimed_size_bytes",
       "deferred_size_bytes",
       "max_quota_used",
-      "max_overlap_count"
+      "max_overlap_count",
+      "max_peak_depth"
     ],
-    "decision_counts_key_order": [
-      "keep",
-      "prune",
-      "defer"
+    "schema_version": "retention-gfs-v1"
+  },
+  "workflow_repair": {
+    "cli_usage": "python3 /app/workflow/reconcile_retention.py --input PATH --output-dir PATH",
+    "defaults": {
+      "input": "/app/data/snapshots.json",
+      "output_dir": "/app/output",
+      "pin_registry": "/app/data/pin_registry.json",
+      "retention_policy": "/app/data/retention_policy.json"
+    },
+    "path": "/app/workflow/reconcile_retention.py",
+    "prohibited_imports": [
+      "pandas",
+      "numpy",
+      "dateutil",
+      "arrow",
+      "pendulum",
+      "pytz",
+      "datetime",
+      "calendar",
+      "zoneinfo"
     ]
-  },
-  "policy_source": {
-    "path": "/app/data/retention_policy.json",
-    "shape": "{\"default\": {field: int, ...}, \"repo_overrides\": {repo: {field: int, ...}, ...}}",
-    "fields": [
-      "cap_daily",
-      "cap_weekly",
-      "cap_monthly",
-      "cap_yearly",
-      "quota_cap",
-      "prune_cap"
-    ]
-  },
-  "pin_registry_source": {
-    "path": "/app/data/pin_registry.json",
-    "shape": "[{\"repo\": str, \"snapshot_id\": str, \"hold\": str, \"note\": str}, ...]"
-  },
-  "runtime_budget_seconds": 120
+  }
 }

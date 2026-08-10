@@ -291,6 +291,67 @@ def overlap_counts(repo_rows: list[dict], protection_days: int) -> dict[str, int
     return counts
 
 
+def peak_depths(repo_rows: list[dict], protection_days: int) -> dict[str, int]:
+    """#RET-7180: the busiest instant inside each snapshot's own window.
+
+    The count of live protection windows only changes where one opens or
+    closes, so the repo's protection depth is a step function over those
+    boundaries. It is built once by sweeping the boundaries in order, and a
+    sparse table over the steps answers each snapshot's window with two
+    lookups. Re-deriving the depth per snapshot walks the whole repo again and
+    is quadratic in the repo's size.
+    """
+    span = protection_days * 86400
+    events: list[tuple[int, int]] = []
+    for row in repo_rows:
+        events.append((row["ts"], 1))
+        events.append((row["ts"] + span + 1, -1))
+    events.sort()
+
+    # bound[k] is where step k begins; depth[k] is how many windows are live
+    # from there until the next boundary.
+    bound: list[int] = []
+    depth: list[int] = []
+    live = 0
+    index = 0
+    while index < len(events):
+        position = events[index][0]
+        while index < len(events) and events[index][0] == position:
+            live += events[index][1]
+            index += 1
+        bound.append(position)
+        depth.append(live)
+
+    # sparse table for range maxima over the steps
+    levels = max(1, len(depth).bit_length())
+    table = [depth]
+    width = 1
+    while width * 2 <= len(depth):
+        previous = table[-1]
+        table.append([
+            max(previous[i], previous[i + width])
+            for i in range(len(depth) - width * 2 + 1)
+        ])
+        width *= 2
+    del levels
+
+    def range_max(lo: int, hi: int) -> int:
+        """Largest depth over steps lo..hi inclusive."""
+        size = hi - lo + 1
+        level = size.bit_length() - 1
+        row = table[level]
+        return max(row[lo], row[hi - (1 << level) + 1])
+
+    peaks: dict[str, int] = {}
+    for row in repo_rows:
+        start = row["ts"]
+        end = start + span
+        lo = bisect.bisect_right(bound, start) - 1
+        hi = bisect.bisect_right(bound, end) - 1
+        peaks[row["snapshot_id"]] = range_max(lo, hi)
+    return peaks
+
+
 def resolve_policy(repo: str, policy_data: dict) -> dict:
     resolved = dict(POLICY_BASELINE)
     for field, val in policy_data.get("default", {}).items():
@@ -308,6 +369,7 @@ DECISION_FIELDS = (
     "snapshot_id", "repo", "vault", "ts", "size_bytes", "size_mb", "pinned", "held",
     "hold", "daily_bucket", "weekly_bucket", "monthly_bucket", "yearly_bucket",
     "roles", "decision", "idle_gap", "carry_in", "used_quota", "overlap_count",
+    "peak_depth",
 )
 
 
@@ -353,9 +415,11 @@ def run(input_path: str, output_dir: str) -> None:
 
     # --- protection-window overlap per repo (#RET-7172) ---
     overlap_lookup: dict[str, int] = {}
+    depth_lookup: dict[str, int] = {}
     for repo in sorted(by_repo):
         policy = resolve_policy(repo, policy_data)
         overlap_lookup.update(overlap_counts(by_repo[repo], policy["protection_days"]))
+        depth_lookup.update(peak_depths(by_repo[repo], policy["protection_days"]))
 
     # --- Stage 6: prune ordering + per-repo prune cap (#RET-7145, #RET-7146) ---
     prune_decision: dict[str, str] = {}
@@ -410,6 +474,7 @@ def run(input_path: str, output_dir: str) -> None:
             "carry_in": carry_in,
             "used_quota": used_quota,
             "overlap_count": overlap_lookup[row["snapshot_id"]],
+            "peak_depth": depth_lookup[row["snapshot_id"]],
         }
         decisions.append(rec)
 
@@ -448,6 +513,7 @@ def run(input_path: str, output_dir: str) -> None:
         "deferred_size_bytes": deferred_size,
         "max_quota_used": max_quota,
         "max_overlap_count": max((d["overlap_count"] for d in decisions), default=0),
+        "max_peak_depth": max((d["peak_depth"] for d in decisions), default=0),
     }
 
     # --- retention_state.json: object keyed by repo ---

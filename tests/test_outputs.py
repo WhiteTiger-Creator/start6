@@ -88,7 +88,10 @@ def _write_json(path: Path, value: object) -> None:
 _CWORK = Path("/candidate-work")
 _run_ctr = itertools.count()
 _SETPRIV = ["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", "--no-new-privs"]
-_RUN_TIMEOUT = 300
+# The contract's own budget, enforced rather than documented: a run that
+# compares protection windows pairwise on these repos does not come back
+# inside it, and a timeout here is a failure exactly as the contract says.
+_RUN_TIMEOUT = RUNTIME_BUDGET_SEC
 
 # The submitted program gets a minimal explicit environment rather than inheriting the verifier's
 # (PATH/PYTHONPATH/CI variables and any other grader context).
@@ -168,6 +171,67 @@ def test_overlap_reported_on_every_decision(primary_outputs):
     assert counts
     assert all(c >= 0 for c in counts)
     assert max(counts) == summary["max_overlap_count"]
+
+
+def test_peak_depth_reported_on_every_decision(primary_outputs):
+    """Every row carries a protection depth, bounded by its own overlap count."""
+    _, summary, _, decisions = primary_outputs
+    depths = [d["peak_depth"] for d in decisions]
+    assert depths
+    for row in decisions:
+        assert isinstance(row["peak_depth"], int) and not isinstance(row["peak_depth"], bool)
+        assert 1 <= row["peak_depth"] <= row["overlap_count"] + 1, row["snapshot_id"]
+    assert max(depths) == summary["max_peak_depth"]
+
+
+def test_peak_depth_is_not_the_overlap_count(primary_outputs):
+    """The busiest instant is a different figure from the window's total.
+
+    A run that reported the overlap count again under another name would pass
+    the bounds check above, so the two are required to disagree in bulk.
+    """
+    _, _, _, decisions = primary_outputs
+    differing = sum(1 for d in decisions if d["peak_depth"] != d["overlap_count"] + 1)
+    assert differing > len(decisions) // 10, (
+        f"only {differing} of {len(decisions)} rows differ from overlap_count + 1"
+    )
+    assert len({d["peak_depth"] for d in decisions}) > 20
+
+
+def test_peak_depth_matches_an_independent_recomputation(primary_outputs):
+    """Recomputed here by direct sweep, which shares no code with the pipeline.
+
+    The depth is sampled at every window boundary lying inside each snapshot's
+    own window, which is where a step function can change; agreeing with that
+    is evidence rather than the same routine run twice.
+    """
+    _, _, _, decisions = primary_outputs
+    by_repo: dict[str, list[dict]] = {}
+    for row in decisions:
+        by_repo.setdefault(row["repo"], []).append(row)
+
+    repo = min(by_repo, key=lambda name: len(by_repo[name]))
+    # protection_days is a resolved policy value, not the baseline: two repos
+    # override it, and using the wrong span here would compare two different
+    # figures rather than checking the pipeline.
+    span = int(_resolve(repo, json.loads(POLICY_PATH.read_text()))["protection_days"]) * 86400
+    rows = sorted(by_repo[repo], key=lambda r: r["ts"])
+    starts = sorted(r["ts"] for r in rows)
+    checked = 0
+    for row in rows[:: max(1, len(rows) // 40)][:40]:
+        window_start, window_end = row["ts"], row["ts"] + span
+        marks = {window_start, window_end}
+        marks.update(t for t in starts if window_start <= t <= window_end)
+        marks.update(
+            t + span for t in starts if window_start <= t + span <= window_end
+        )
+        best = 0
+        for instant in sorted(marks):
+            live = sum(1 for r in rows if r["ts"] <= instant <= r["ts"] + span)
+            best = max(best, live)
+        assert row["peak_depth"] == best, f"{row['snapshot_id']}: {row['peak_depth']} vs {best}"
+        checked += 1
+    assert checked >= 10
 
 
 def test_overlap_varies_across_the_inventory(primary_outputs):
