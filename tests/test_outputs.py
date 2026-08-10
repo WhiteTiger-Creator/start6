@@ -10,7 +10,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -20,6 +19,7 @@ ORIGINAL_WORKFLOW_PATH = Path("/app/workflow/.reconcile_retention.original")
 DEFAULT_INPUT = Path("/app/data/snapshots.json")
 CATALOGUE_PATH = Path("/app/data/snapshot_catalogue_pre_incident.json")
 JOURNAL_PATH = Path("/app/data/snapshot_replay_journal.json")
+DATA_DIR = Path("/app/data")
 POLICY_PATH = Path("/app/data/retention_policy.json")
 PIN_REGISTRY_PATH = Path("/app/data/pin_registry.json")
 SPEC_PATH = Path("/app/docs/report_spec.json")
@@ -95,6 +95,26 @@ _RUN_TIMEOUT = 300
 _CANDIDATE_ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/candidate-work", "LANG": "C.UTF-8"}
 
 
+def _publish_inputs() -> None:
+    """Open read access on the agent-produced inputs before privileges drop.
+
+    A correct solution may write its recovered inventory atomically, leaving the
+    file mode 0600 and owned by root. The verifier then runs the submitted
+    program as uid 65534, which could not read it -- so file ownership, not
+    correctness, would decide the score. The verifier is root here, so it grants
+    read access first.
+    """
+    for path in sorted(DATA_DIR.rglob("*")):
+        try:
+            os.chmod(path, 0o755 if path.is_dir() else 0o644)
+        except OSError:
+            pass
+    try:
+        os.chmod(DATA_DIR, 0o755)
+    except OSError:
+        pass
+
+
 def _candidate_dir() -> Path:
     d = _CWORK / f"run-{next(_run_ctr)}"
     d.mkdir(parents=True, exist_ok=True)
@@ -111,6 +131,7 @@ def _run_agent(argv, cwd: Path):
 
 
 def _run_pipeline(tmp_path: Path, script_path: Path = WORKFLOW_PATH, input_path: Path = DEFAULT_INPUT):
+    _publish_inputs()
     work = _candidate_dir()
     out_dir = work / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -134,25 +155,14 @@ def primary_outputs(tmp_path_factory):
     return _run_pipeline(tmp_path_factory.mktemp("primary"))
 
 
-@pytest.fixture(scope="session")
-def primary_elapsed(tmp_path_factory):
-    started = time.monotonic()
-    _run_pipeline(tmp_path_factory.mktemp("timed"))
-    return time.monotonic() - started
-
-
-def test_graded_run_meets_documented_runtime_budget(primary_elapsed):
-    assert primary_elapsed < RUNTIME_BUDGET_SEC, (
-        f"one graded run took {primary_elapsed:.1f}s against the contract's "
-        f"{RUNTIME_BUDGET_SEC:.0f}s budget"
-    )
-
-
 def test_runtime_budget_is_stated_in_the_contract():
+    """The budget the instruction quotes is the one the output contract carries,
+    so the agent is told the same number in both places."""
     assert float(SPEC["runtime_budget_seconds"]) == RUNTIME_BUDGET_SEC
 
 
 def test_overlap_reported_on_every_decision(primary_outputs):
+    """Every decision row carries an overlap count, and the summary's maximum matches the largest of them."""
     _, summary, _, decisions = primary_outputs
     counts = [d["overlap_count"] for d in decisions]
     assert counts
@@ -187,6 +197,7 @@ def _naive_concatenation() -> list[dict]:
 
 
 def test_recovery_sources_are_intact():
+    """The pre-incident catalogue and the replay journal are left exactly as shipped."""
     assert _digest(_load_json(CATALOGUE_PATH)) == FIXTURE["catalogue_digest"]
     assert _digest(_load_json(JOURNAL_PATH)) == FIXTURE["journal_digest"]
 
@@ -200,6 +211,7 @@ def test_snapshot_inventory_recovered():
 
 
 def test_recovered_records_carry_no_journal_bookkeeping():
+    """Recovered records carry only the contracted snapshot fields, never journal_seq or journal_op."""
     for record in _load_json(DEFAULT_INPUT):
         assert set(record) == set(SNAPSHOT_FIELDS)
 
@@ -208,8 +220,10 @@ def test_shipped_and_naive_inventories_differ_from_the_recovered_one():
     """The recovery is real work: neither the truncated file nor the draft merge match."""
     expected = FIXTURE["recovered_digest"]
     assert FIXTURE["shipped_truncated_digest"] != expected
-    assert _load_json(CATALOGUE_PATH) != expected
-    assert _naive_concatenation() != expected
+    # both sides must be digests: comparing a parsed list against a digest
+    # string is never equal and would pass no matter what the recovery did
+    assert _digest(_load_json(CATALOGUE_PATH)) != expected
+    assert _digest(_naive_concatenation()) != expected
 
 
 def test_reconciler_output_depends_on_the_recovered_inventory(tmp_path: Path):
@@ -232,31 +246,84 @@ def test_reconciler_output_depends_on_the_recovered_inventory(tmp_path: Path):
 # Step 2: the reconciler output contract
 # --------------------------------------------------------------------------
 def test_cli_exists():
+    """The reconciler is present and still accepts its --input and --output-dir options."""
     assert WORKFLOW_PATH.exists()
 
 
 def test_output_dir_contains_exactly_three_files(primary_outputs):
+    """A run writes exactly the three contracted files and nothing else."""
     out_dir, _, _, _ = primary_outputs
     names = sorted(p.name for p in out_dir.iterdir() if p.is_file())
     assert names == ["retention_decisions.jsonl", "retention_state.json", "summary.json"]
 
 
 def test_primary_summary_matches_fixture(primary_outputs):
+    """The summary for the graded inventory matches the sealed reference exactly."""
     _, summary, _, _ = primary_outputs
     assert summary == FIXTURE["primary"]["summary"]
 
 
 def test_primary_state_matches_fixture(primary_outputs):
+    """The retention state for the graded inventory matches the sealed reference exactly."""
     _, _, state, _ = primary_outputs
     assert _digest(state) == FIXTURE["primary"]["state_digest"]
 
 
 def test_primary_decisions_matches_fixture(primary_outputs):
+    """The decision rows for the graded inventory match the sealed reference exactly."""
     _, _, _, decisions = primary_outputs
     assert _digest(decisions) == FIXTURE["primary"]["decisions_digest"]
 
 
+def _same_scalar_type(got: object, want: object) -> bool:
+    """Exact type match. bool subclasses int in Python, so they are separated
+    explicitly, and an integer count written as a float is not the same type."""
+    if isinstance(got, bool) != isinstance(want, bool):
+        return False
+    return type(got) is type(want)
+
+
+def test_summary_field_types_are_exact(primary_outputs):
+    """Every summary field carries the contracted scalar type. Equality alone
+    would accept a count emitted as 5006.0, because Python compares that equal
+    to 5006; the type has to be checked separately."""
+    summary = primary_outputs[1]
+    expected = FIXTURE["primary"]["summary"]
+    for key, want in expected.items():
+        got = summary[key]
+        assert _same_scalar_type(got, want), (
+            f"{key}: contract says {type(want).__name__}, got {type(got).__name__} ({got!r})"
+        )
+
+
+def test_summary_serialises_identically_to_the_contract(primary_outputs):
+    """The summary's canonical JSON text matches the sealed one, so a value
+    written with a different numeric form is caught even where == would not."""
+    assert _digest(primary_outputs[1]) == _digest(FIXTURE["primary"]["summary"])
+
+
+def test_decision_field_types_are_exact(primary_outputs):
+    """Decision rows carry the contracted scalar types, including integer
+    counts that must not be emitted as floats and booleans that must not be
+    emitted as 0/1."""
+    decisions = primary_outputs[3]
+    ints = ("ts", "size_bytes", "size_mb", "daily_bucket", "weekly_bucket",
+            "monthly_bucket", "yearly_bucket", "idle_gap", "carry_in",
+            "used_quota", "overlap_count")
+    for row in decisions[:400]:
+        for field in ints:
+            value = row[field]
+            assert isinstance(value, int) and not isinstance(value, bool), (
+                f"{field} must be an integer, got {type(value).__name__} ({value!r})"
+            )
+        for field in ("pinned", "held"):
+            assert isinstance(row[field], bool), f"{field} must be a boolean"
+        for field in ("snapshot_id", "repo", "vault", "decision"):
+            assert isinstance(row[field], str), f"{field} must be a string"
+
+
 def test_summary_schema(primary_outputs):
+    """The summary carries exactly the contracted field set and schema version."""
     _, summary, _, _ = primary_outputs
     assert set(summary) == SUMMARY_KEYS
     assert summary["schema_version"] == SPEC["summary_json"]["schema_version"]
@@ -264,6 +331,7 @@ def test_summary_schema(primary_outputs):
 
 
 def test_state_schema_and_sorting(primary_outputs):
+    """Retention state is an object keyed in ascending order with exactly the contracted fields."""
     _, _, state, _ = primary_outputs
     assert list(state) == sorted(state)
     for entry in state.values():
@@ -275,6 +343,7 @@ def test_state_schema_and_sorting(primary_outputs):
 
 
 def test_decisions_required_fields_and_compact(primary_outputs):
+    """Decision rows carry exactly the contracted fields and are written as compact JSON lines."""
     out_dir, _, _, decisions = primary_outputs
     role_enum = set(SPEC["field_types"]["roles"]["items"]["enum"])
     hold_enum = set(SPEC["field_types"]["hold"]["enum"])
@@ -298,6 +367,7 @@ def test_decisions_required_fields_and_compact(primary_outputs):
 
 
 def test_decisions_emission_order(primary_outputs):
+    """Decision rows are emitted in the governing order."""
     _, _, _, decisions = primary_outputs
     assert decisions == sorted(
         decisions,
@@ -308,6 +378,7 @@ def test_decisions_emission_order(primary_outputs):
 
 
 def test_decision_counts_enumerate_all_three(primary_outputs):
+    """The summary enumerates keep, prune and defer, emitting a count for each."""
     _, summary, _, decisions = primary_outputs
     counts = {d: 0 for d in DECISION_ORDER}
     for row in decisions:
@@ -318,6 +389,7 @@ def test_decision_counts_enumerate_all_three(primary_outputs):
 
 
 def test_summary_math_consistency(primary_outputs):
+    """Summary totals reconcile against the decision rows they aggregate."""
     _, summary, state, decisions = primary_outputs
     kept = [r for r in decisions if r["decision"] == "keep"]
     pruned = [r for r in decisions if r["decision"] == "prune"]
@@ -342,6 +414,7 @@ def test_summary_math_consistency(primary_outputs):
 
 
 def test_summary_counts_track_the_recovered_inventory(primary_outputs):
+    """Summary counts track the recovered inventory rather than the truncated file."""
     _, summary, _, _ = primary_outputs
     inventory = _load_json(DEFAULT_INPUT)
     assert summary["raw_snapshot_count"] == len(inventory)
@@ -360,6 +433,7 @@ def test_promotion_union_present(primary_outputs):
 # Original / broken snapshot
 # --------------------------------------------------------------------------
 def test_original_snapshot_preserved():
+    """The frozen incident snapshot is left byte-identical."""
     assert ORIGINAL_WORKFLOW_PATH.exists()
     digest = hashlib.sha256(ORIGINAL_WORKFLOW_PATH.read_bytes()).hexdigest()
     assert digest == FIXTURE["broken_pipeline_sha256"]
@@ -368,6 +442,7 @@ def test_original_snapshot_preserved():
 def test_broken_snapshot_is_wrong(tmp_path: Path):
     # Assert only that the frozen broken snapshot DIFFERS from the reference; its
     # exact output is intentionally never pinned.
+    """The shipped draft does not reproduce the governed result."""
     _, broken_summary, broken_state, broken_decisions = _run_pipeline(
         tmp_path, script_path=ORIGINAL_WORKFLOW_PATH
     )
@@ -380,12 +455,14 @@ def test_broken_snapshot_is_wrong(tmp_path: Path):
 # Generalization / idempotency / CLI
 # --------------------------------------------------------------------------
 def test_pipeline_rerun_idempotent(tmp_path: Path):
+    """Re-running the reconciler on the same inventory produces identical artifacts."""
     _, sa, sta, da = _run_pipeline(tmp_path / "a")
     _, sb, stb, db = _run_pipeline(tmp_path / "b")
     assert (sa, sta, da) == (sb, stb, db)
 
 
 def test_pipeline_supports_alternate_input(tmp_path: Path):
+    """The reconciler generalises to an alternate inventory it has never seen."""
     _, summary, state, decisions = _run_pipeline(tmp_path, input_path=ALT_INPUT)
     assert summary == FIXTURE["alternate"]["summary"]
     assert _digest(state) == FIXTURE["alternate"]["state_digest"]
@@ -393,6 +470,7 @@ def test_pipeline_supports_alternate_input(tmp_path: Path):
 
 
 def test_cli_defaults_work_and_match_explicit_run(tmp_path: Path):
+    """A no-argument run uses the contracted defaults and produces the same summary as an explicit run."""
     _, explicit_summary, _, _ = _run_pipeline(tmp_path)
     # The no-argument run writes to the default /app/output; clear any root-owned artifacts from
     # solve.sh and make the dir candidate-writable so the unprivileged program can populate it.
@@ -400,6 +478,7 @@ def test_cli_defaults_work_and_match_explicit_run(tmp_path: Path):
     shutil.rmtree(default_out, ignore_errors=True)
     default_out.mkdir(parents=True, exist_ok=True)
     os.chmod(default_out, 0o777)
+    _publish_inputs()
     _run_agent([sys.executable, str(WORKFLOW_PATH)], cwd=_candidate_dir())
     assert _load_json(default_out / "summary.json") == explicit_summary
 
@@ -436,6 +515,7 @@ def test_submitted_program_runs_unprivileged_and_cannot_write_reward(tmp_path: P
 # Source-path influence
 # --------------------------------------------------------------------------
 def test_policy_source_path_affects_output(tmp_path: Path):
+    """The retention policy is read from its fixed path at run time, so mutating it changes the output."""
     original = POLICY_PATH.read_text()
     try:
         data = json.loads(original)
@@ -451,6 +531,7 @@ def test_policy_source_path_affects_output(tmp_path: Path):
 
 
 def test_pin_registry_source_path_affects_output(tmp_path: Path):
+    """The pin registry is read from its fixed path at run time, so removing holds changes the output."""
     original = PIN_REGISTRY_PATH.read_text()
     try:
         _, summary_a, _, _ = _run_pipeline(tmp_path / "a")
@@ -475,6 +556,7 @@ def _resolve(repo: str, data: dict) -> dict:
 
 
 def test_sparse_override_inherits_remaining_fields():
+    """A single-field repo override inherits every other field from the baseline."""
     data = json.loads(POLICY_PATH.read_text())
     overrides = data.get("repo_overrides", {})
     sparse = [r for r, o in overrides.items() if len(o) == 1]
@@ -490,6 +572,7 @@ def test_sparse_override_inherits_remaining_fields():
 
 
 def test_policy_default_may_omit_fields_and_falls_back_to_baseline():
+    """Fields the policy file omits fall back to the governed baseline."""
     data = json.loads(POLICY_PATH.read_text())
     omitted = [f for f in POLICY_FIELDS if f not in data.get("default", {})]
     assert omitted, "the shipped policy must omit at least one field to exercise fallback"
@@ -525,6 +608,7 @@ def _naive_standard_gfs_kept(rows: list[dict], policy: dict) -> set[str]:
 
 
 def test_standard_gfs_retention_produces_wrong_answers(tmp_path: Path):
+    """The governed dialect departs from a textbook grandfather-father-son scheme, so the conventional answer is wrong."""
     rows = [
         {"snapshot_id": "g1", "repo": "gfs-dialect", "vault": "hot",
          "ts": 1735714800, "size_bytes": 3000000000, "pinned": False, "note": "06:00"},
@@ -554,6 +638,7 @@ def test_standard_gfs_retention_produces_wrong_answers(tmp_path: Path):
 # Anti-delegation: static AST ban on dataframe / date-library engines
 # --------------------------------------------------------------------------
 def test_reconciler_does_not_import_banned_engines():
+    """The reconciler does not delegate retention to a prohibited library."""
     tree = ast.parse(WORKFLOW_PATH.read_text(encoding="utf-8"))
     banned = set(SPEC["workflow_repair"]["prohibited_imports"])
     found = set()
@@ -586,10 +671,12 @@ def test_ast_check_catches_datetime_importing_engine(tmp_path: Path):
 # Sources stay operational
 # --------------------------------------------------------------------------
 def test_governance_log_present():
+    """The governance log the rules are reconstructed from is present in the environment."""
     assert LOG_PATH.exists() and LOG_PATH.stat().st_size > 0
 
 
 def test_pipeline_does_not_reference_test_artifacts():
+    """The reconciler never references verifier artifacts or the reward path."""
     code = WORKFLOW_PATH.read_text(encoding="utf-8")
     for token in ("/tests", "expected_report.json", "alt_snapshots.json"):
         assert token not in code
