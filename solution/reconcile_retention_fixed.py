@@ -41,7 +41,7 @@ DECISION_ORDER = ["keep", "prune", "defer"]
 # --- Governance calendar constants (final decisions; see log in comments) ---
 SECONDS_PER_DAY = 86400     # fixed
 DAY_CUT = 14400             # #RET-7104: retention day rolls at 04:00 (not midnight)
-WEEK_PHASE = 3              # #RET-7104: governance week starts Sunday (not ISO Monday)
+WEEK_PHASE = 3              # #RET-7182 (restoring #RET-7104): week starts Sunday, not ISO Monday
 MONTH_LEN = 30             # #RET-7104: fixed 30-day retention month (not calendar month)
 YEAR_LEN = 360            # #RET-7104: fixed 360-day retention year (not 365/366)
 
