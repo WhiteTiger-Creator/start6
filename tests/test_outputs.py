@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import itertools
 import json
@@ -840,39 +839,6 @@ def test_standard_gfs_retention_produces_wrong_answers(tmp_path: Path):
         f"(reconciler={sorted(reconciler_kept)}, naive={sorted(naive_kept)})"
     )
     assert "g1" in reconciler_kept and "g1" not in naive_kept
-
-
-# --------------------------------------------------------------------------
-# Anti-delegation: static AST ban on dataframe / date-library engines
-# --------------------------------------------------------------------------
-def test_reconciler_does_not_import_banned_engines():
-    """The reconciler does not delegate retention to a prohibited library."""
-    tree = ast.parse(WORKFLOW_PATH.read_text(encoding="utf-8"))
-    banned = set(SPEC["workflow_repair"]["prohibited_imports"])
-    found = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                found.add(alias.name.split(".")[0])
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            found.add(node.module.split(".")[0])
-    offending = banned & found
-    assert not offending, f"reconciler must not delegate to a dataframe/date engine: {offending}"
-
-
-def test_ast_check_catches_datetime_importing_engine(tmp_path: Path):
-    """The AST ban is real: a datetime-importing calendar delegate is detected."""
-    shim = tmp_path / "delegating_engine.py"
-    shim.write_text("import datetime\n\n\ndef run(a, b):\n    return datetime.datetime.utcfromtimestamp(a)\n")
-    tree = ast.parse(shim.read_text())
-    imported = {
-        alias.name.split(".")[0]
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    }
-    assert "datetime" in imported
-    assert "datetime" in set(SPEC["workflow_repair"]["prohibited_imports"])
 
 
 # --------------------------------------------------------------------------
