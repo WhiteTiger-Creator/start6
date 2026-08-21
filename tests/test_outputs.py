@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import itertools
 import json
@@ -22,6 +23,9 @@ DATA_DIR = Path("/app/data")
 POLICY_PATH = Path("/app/data/retention_policy.json")
 PIN_REGISTRY_PATH = Path("/app/data/pin_registry.json")
 SPEC_PATH = Path("/app/docs/report_spec.json")
+# The contract is golden metadata: the verifier reads it from its own image,
+# never from the agent-writable copy under /app.
+GOLDEN_CONTRACT_PATH = Path("/tests/fixtures/contract_golden.json")
 LOG_PATH = Path("/app/incident/retention_governance_log.md")
 EXPECTED_FIXTURE = Path("/tests/fixtures/expected_report.json")
 ALT_INPUT = Path("/tests/fixtures/alt_snapshots.json")
@@ -34,7 +38,7 @@ DECISION_ORDER = ["keep", "prune", "defer"]
 CLASS_RANK = {"prune": 0, "defer": 1, "keep": 2}
 
 FIXTURE = json.loads(EXPECTED_FIXTURE.read_text())
-SPEC = json.loads(SPEC_PATH.read_text())
+SPEC = json.loads(GOLDEN_CONTRACT_PATH.read_text())
 
 POLICY_FIELDS = ("protection_days", "cap_daily", "cap_weekly", "cap_monthly",
                  "cap_yearly", "quota_cap", "prune_cap")
@@ -687,7 +691,13 @@ def test_cli_defaults_work_and_match_explicit_run(tmp_path: Path):
     os.chmod(default_out, 0o777)
     _publish_inputs()
     _run_agent([sys.executable, str(WORKFLOW_PATH)], cwd=_candidate_dir())
+    assert sorted(q.name for q in default_out.iterdir()) == [
+        "retention_decisions.jsonl", "retention_state.json", "summary.json"]
+    _, _, explicit_state, explicit_decisions = _run_pipeline(tmp_path / "again")
     assert _load_json(default_out / "summary.json") == explicit_summary
+    assert _digest(_load_json(default_out / "retention_state.json")) == _digest(explicit_state)
+    assert _digest(_load_jsonl(default_out / "retention_decisions.jsonl")) == \
+        _digest(explicit_decisions)
 
 
 def test_submitted_program_runs_unprivileged_and_cannot_write_reward(tmp_path: Path):
@@ -849,8 +859,68 @@ def test_governance_log_present():
     assert LOG_PATH.exists() and LOG_PATH.stat().st_size > 0
 
 
+def _source_strings(source: str) -> list[str]:
+    """Every string literal in the submitted source, read from the parse tree.
+
+    A raw substring scan would reject a correct reconciler that merely mentions
+    one of these names in a comment or a docstring.
+    """
+    tree = ast.parse(source)
+    return [n.value for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+
+
+def _imported_roots(source: str) -> set[str]:
+    """Top-level packages the submitted source imports, from its declarations."""
+    roots: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            roots |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            roots.add(node.module.split(".")[0])
+    return roots
+
+
 def test_pipeline_does_not_reference_test_artifacts():
-    """The reconciler never references verifier artifacts or the reward path."""
-    code = WORKFLOW_PATH.read_text(encoding="utf-8")
+    """The reconciler never reads a verifier artifact.
+
+    Only string literals are inspected, so naming one of these in prose is not a
+    breach; using one as a path is.
+    """
+    literals = _source_strings(WORKFLOW_PATH.read_text(encoding="utf-8"))
     for token in ("/tests", "expected_report.json", "alt_snapshots.json"):
-        assert token not in code
+        assert not any(token in literal for literal in literals), token
+
+
+def test_reconciler_computes_the_calendar_without_a_date_library():
+    """#RET-7104 says compute every bucket id by hand; the contract names the
+    packages that would do it for you, and none may be imported."""
+    banned = set(SPEC["workflow_repair"]["prohibited_imports"])
+    assert banned, "the contract must name the packages it bans"
+    offending = banned & _imported_roots(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    assert not offending, f"the calendar must be computed by hand, not by {sorted(offending)}"
+
+
+def test_the_import_ban_reads_declarations_not_prose(tmp_path: Path):
+    """The ban fires on a real import and stays silent on a mention in prose."""
+    offending = "import json\nimport datetime\n\nx = datetime.date.today()\n"
+    assert "datetime" in _imported_roots(offending)
+    innocent = (
+        '"""Bucket ids are computed by hand rather than with datetime."""\n'
+        "import json\n"
+        "NOTE = 'no calendar module here'\n"
+        "gday = (ts - 14400) // 86400\n"
+    )
+    banned = set(SPEC["workflow_repair"]["prohibited_imports"])
+    assert not (banned & _imported_roots(innocent))
+
+
+def test_shipped_contract_matches_the_golden_copy():
+    """The output contract in the environment is unmodified.
+
+    Field lists, container shapes and sort orders are golden metadata and are read
+    from the verifier's own image; this proves the agent's copy still agrees with
+    it, so the contract cannot be trimmed to weaken a schema check.
+    """
+    shipped = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
+    assert shipped == json.loads(GOLDEN_CONTRACT_PATH.read_text(encoding="utf-8"))

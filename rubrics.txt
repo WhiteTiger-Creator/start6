@@ -1,0 +1,15 @@
+Agent reads /app/incident/retention_governance_log.md and traces each rule to its final dated decision rather than taking the first statement of it, +5
+Agent identifies that the shipped /app/data/snapshots.json is truncated and rebuilds it from the pre-incident catalogue and the replay journal before touching the reconciler, +5
+Agent replays the journal in its recorded order, applying retractions and overwrites in place rather than concatenating the two sources, +3
+Agent establishes that a kept snapshot re-anchors a vault's incremental chain and that a run of candidates can only be cut from its newest end, +5
+Agent selects the prune set by what the cap can actually reclaim across all runs together rather than by taking the largest candidates or the best whole run first, +5
+Agent applies the governance calendar boundaries and the earliest-of-bucket representative instead of a stock age-based scheme, +3
+Agent carries the quota ledger as running state per repo, resetting it on the idle boundary and rounding decay and size upward, +3
+Agent computes the protection-window overlap and depth without comparing every pair of snapshots in a repo, +2
+Agent runs the repaired reconciler and inspects the three output files rather than assuming the run succeeded, +2
+Agent re-runs the pipeline and compares the outputs to confirm the run is reproducible, +1
+Agent prunes a snapshot while leaving a later snapshot of the same vault deferred, breaking the chain that depends on it, -5
+Agent modifies /app/data/snapshot_catalogue_pre_incident.json, /app/data/snapshot_replay_journal.json or the governance log instead of treating them as read-only sources, -5
+Agent hardcodes a per-tier cap, the quota cap or the prune cap instead of resolving it from the retention policy, -3
+Agent edits or deletes the frozen snapshot /app/workflow/.reconcile_retention.original, -3
+Agent settles for a prune selection it knows reclaims less than the cap allows rather than fixing the selection, -2

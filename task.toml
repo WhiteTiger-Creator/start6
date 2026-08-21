@@ -1,3 +1,4 @@
+schema_version = "2.0"
 artifacts = ["/app"]
 name = "backup-retention-reconciler"
 
@@ -5,7 +6,7 @@ name = "backup-retention-reconciler"
 author_name = "Jonathan"
 author_email = "jtolbert0175@gmail.com"
 difficulty_explanation = '''
-The prune cycle is the part that cannot be approximated, and the obvious reading of it is not merely
+Rebuilding this inventory and reconciler is the work of a storage-platform or backup infrastructure engineer picking up after a failed rollout. The prune cycle is the part that cannot be approximated, and the obvious reading of it is not merely
 slower but wrong. Restores are chained: inside a vault the snapshots are one incremental chain and a
 kept snapshot re-anchors it, so the candidates between two kept snapshots form a run that can only be
 cut from its newest end. Dropping the largest candidates wherever they sit -- which is what the
