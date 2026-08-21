@@ -229,15 +229,6 @@
       "pin_registry": "/app/data/pin_registry.json",
       "retention_policy": "/app/data/retention_policy.json"
     },
-    "path": "/app/workflow/reconcile_retention.py",
-    "prohibited_imports": [
-      "arrow",
-      "calendar",
-      "dateutil",
-      "datetime",
-      "pendulum",
-      "pytz",
-      "zoneinfo"
-    ]
+    "path": "/app/workflow/reconcile_retention.py"
   }
 }

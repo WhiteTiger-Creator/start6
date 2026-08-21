@@ -64,7 +64,7 @@ reclaimed per repo must equal the optimum recomputed independently in the verifi
 formulation; and the two plausible wrong selections are shown to be wrong on this data, the
 size-ordered one by reporting more bytes than is achievable and the chain-respecting greedy one by
 reclaiming less. Schema, sort, tier, ledger, cap and summary-arithmetic invariants are asserted
-separately, along with idempotency, the command-line defaults, an AST ban on date libraries and a
+separately, along with idempotency, the command-line defaults and a
 check that the committee dialect deviates from a stock scheme. The frozen snapshot
 /app/workflow/.reconcile_retention.original is asserted present by hash and wrong by output.
 Confirmed locally in the real two-container flow: after solve.sh the verifier gives reward 1; a fresh

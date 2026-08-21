@@ -870,17 +870,6 @@ def _source_strings(source: str) -> list[str]:
             if isinstance(n, ast.Constant) and isinstance(n.value, str)]
 
 
-def _imported_roots(source: str) -> set[str]:
-    """Top-level packages the submitted source imports, from its declarations."""
-    roots: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Import):
-            roots |= {a.name.split(".")[0] for a in node.names}
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            roots.add(node.module.split(".")[0])
-    return roots
-
-
 def test_pipeline_does_not_reference_test_artifacts():
     """The reconciler never reads a verifier artifact.
 
@@ -890,29 +879,6 @@ def test_pipeline_does_not_reference_test_artifacts():
     literals = _source_strings(WORKFLOW_PATH.read_text(encoding="utf-8"))
     for token in ("/tests", "expected_report.json", "alt_snapshots.json"):
         assert not any(token in literal for literal in literals), token
-
-
-def test_reconciler_computes_the_calendar_without_a_date_library():
-    """#RET-7104 says compute every bucket id by hand; the contract names the
-    packages that would do it for you, and none may be imported."""
-    banned = set(SPEC["workflow_repair"]["prohibited_imports"])
-    assert banned, "the contract must name the packages it bans"
-    offending = banned & _imported_roots(WORKFLOW_PATH.read_text(encoding="utf-8"))
-    assert not offending, f"the calendar must be computed by hand, not by {sorted(offending)}"
-
-
-def test_the_import_ban_reads_declarations_not_prose(tmp_path: Path):
-    """The ban fires on a real import and stays silent on a mention in prose."""
-    offending = "import json\nimport datetime\n\nx = datetime.date.today()\n"
-    assert "datetime" in _imported_roots(offending)
-    innocent = (
-        '"""Bucket ids are computed by hand rather than with datetime."""\n'
-        "import json\n"
-        "NOTE = 'no calendar module here'\n"
-        "gday = (ts - 14400) // 86400\n"
-    )
-    banned = set(SPEC["workflow_repair"]["prohibited_imports"])
-    assert not (banned & _imported_roots(innocent))
 
 
 def test_shipped_contract_matches_the_golden_copy():

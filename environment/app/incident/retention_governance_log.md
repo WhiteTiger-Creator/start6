@@ -131,7 +131,7 @@ Historical tape indices remain archived and non-authoritative for the JSON recon
 
 ### Review entry 1027 — vault/obj repo
 Shift lead logged a routine observation for vault/obj during retention window 1027. Change-board reviewed stale retention exceptions; owners pinged before the next reconcile cycle.
-> **Governance decision (2026-05-04 - #RET-7104)** Lena: governance retention calendar (integer epoch-seconds, deviates from ISO week and naive floor-division): a retention DAY rolls at 04:00 UTC not midnight so gday = (ts - 14400) // 86400; the retention WEEK starts Sunday not ISO Monday so gweek = (gday - 3) // 7; the retention MONTH is a fixed 30-day block gmonth = gday // 30 (NOT a calendar month); the retention YEAR is a fixed 360-day block gyear = gday // 360. Compute every bucket id from these by hand; do not use a date library. Supersedes #RET-7004
+> **Governance decision (2026-05-04 - #RET-7104)** Lena: governance retention calendar (integer epoch-seconds, deviates from ISO week and naive floor-division): a retention DAY rolls at 04:00 UTC not midnight so gday = (ts - 14400) // 86400; the retention WEEK starts Sunday not ISO Monday so gweek = (gday - 3) // 7; the retention MONTH is a fixed 30-day block gmonth = gday // 30 (NOT a calendar month); the retention YEAR is a fixed 360-day block gyear = gday // 360. Compute every bucket id from these integer formulas: not one of these boundaries is the one a calendar library would give you, so a library's own day, week, month or year semantics will not reproduce them. Supersedes #RET-7004
 No reconciler semantics changed in this entry; parameters remain as approved by the governance board.
 
 ### Review entry 1028 — archive/cold repo
