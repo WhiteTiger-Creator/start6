@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import itertools
 import json
@@ -60,6 +59,16 @@ def _digest(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    """Digest of a file's raw bytes.
+
+    instruction.md promises the operational inputs come back *byte*-identical, so
+    a parsed-content comparison is not enough: it would accept a reformat or a key
+    reorder that the sentence rules out.
+    """
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 # Documented wall-clock budget for one full run on the graded inventory.
@@ -264,7 +273,18 @@ def _naive_concatenation() -> list[dict]:
 
 
 def test_recovery_sources_are_intact():
-    """The pre-incident catalogue and the replay journal are left exactly as shipped."""
+    """The operational inputs a run reads come back byte-identical.
+
+    instruction.md names the catalogue, the replay journal, the retention policy
+    and the pin registry as files a run must leave alone, so all four are checked,
+    and checked over their raw bytes rather than their parsed content.
+    """
+    byte_digests = FIXTURE["input_bytes_sha256"]
+    assert _file_sha256(CATALOGUE_PATH) == byte_digests["snapshot_catalogue_pre_incident.json"]
+    assert _file_sha256(JOURNAL_PATH) == byte_digests["snapshot_replay_journal.json"]
+    assert _file_sha256(POLICY_PATH) == byte_digests["retention_policy.json"]
+    assert _file_sha256(PIN_REGISTRY_PATH) == byte_digests["pin_registry.json"]
+    # The parsed digests stay as a second, redundant reading of the same promise.
     assert _digest(_load_json(CATALOGUE_PATH)) == FIXTURE["catalogue_digest"]
     assert _digest(_load_json(JOURNAL_PATH)) == FIXTURE["journal_digest"]
 
@@ -882,17 +902,6 @@ def test_governance_log_present():
     assert LOG_PATH.exists() and LOG_PATH.stat().st_size > 0
 
 
-def _source_strings(source: str) -> list[str]:
-    """Every string literal in the submitted source, read from the parse tree.
-
-    A raw substring scan would reject a correct reconciler that merely mentions
-    one of these names in a comment or a docstring.
-    """
-    tree = ast.parse(source)
-    return [n.value for n in ast.walk(tree)
-            if isinstance(n, ast.Constant) and isinstance(n.value, str)]
-
-
 def test_shipped_contract_matches_the_golden_copy():
     """The output contract in the environment is unmodified.
 
@@ -900,5 +909,8 @@ def test_shipped_contract_matches_the_golden_copy():
     from the verifier's own image; this proves the agent's copy still agrees with
     it, so the contract cannot be trimmed to weaken a schema check.
     """
-    shipped = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
-    assert shipped == json.loads(GOLDEN_CONTRACT_PATH.read_text(encoding="utf-8"))
+    assert json.loads(SPEC_PATH.read_text(encoding="utf-8")) == json.loads(
+        GOLDEN_CONTRACT_PATH.read_text(encoding="utf-8"))
+    # instruction.md promises this file comes back byte-identical too, not merely
+    # equal once parsed.
+    assert _file_sha256(SPEC_PATH) == _file_sha256(GOLDEN_CONTRACT_PATH)

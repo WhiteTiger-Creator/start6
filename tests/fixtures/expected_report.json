@@ -30,6 +30,12 @@
   },
   "broken_pipeline_sha256": "3d815b9d26eb9fe853bec3462d1b2499b6416e705e5169426045cab7adb64d88",
   "catalogue_digest": "c48143b789e527264daf020079ad618b84ae640b259b29cbb2bd703b5fc7927f",
+  "input_bytes_sha256": {
+    "pin_registry.json": "1ed46dbef68f6ea59fe71a169712743c16f39841ee592f4ffea4ea5015803b56",
+    "retention_policy.json": "3168f954590efd04fe5eb2d80bd3de11d3010162185b8481a4f6e28f9ee2a90e",
+    "snapshot_catalogue_pre_incident.json": "b32d5be4cf4183225cfc3af03159475741410ccf21f7702214c73d7b0266de84",
+    "snapshot_replay_journal.json": "e8b742d5e491ba38e2ce7e59f5d64a8b29fecdf6d79916a51b6949b95dcf8fdd"
+  },
   "journal_digest": "08581a091fbb7d681d20db1b42cbe898f4feca4a4cb3d2d021583a6781bb0e3d",
   "primary": {
     "decision_count": 78000,
