@@ -312,9 +312,19 @@ def test_reconciler_output_depends_on_the_recovered_inventory(tmp_path: Path):
 # --------------------------------------------------------------------------
 # Step 2: the reconciler output contract
 # --------------------------------------------------------------------------
-def test_cli_exists():
-    """The reconciler is present and still accepts its --input and --output-dir options."""
+def test_cli_exists(primary_outputs):
+    """The reconciler is present and honours the options it is required to keep.
+
+    Existence alone would pass a program that had dropped either option. The
+    graded run is made with an explicit --input and --output-dir, so requiring
+    its artifacts to be in that destination rather than the documented default
+    shows both options were read.
+    """
     assert WORKFLOW_PATH.exists()
+    out_dir, _, _, _ = primary_outputs
+    assert out_dir != Path("/app/output"), "the graded run must use the directory it was given"
+    assert sorted(q.name for q in out_dir.iterdir() if q.is_file()) == [
+        "retention_decisions.jsonl", "retention_state.json", "summary.json"]
 
 
 def test_output_dir_contains_exactly_three_files(primary_outputs):
@@ -703,29 +713,42 @@ def test_cli_defaults_work_and_match_explicit_run(tmp_path: Path):
 def test_submitted_program_runs_unprivileged_and_cannot_write_reward(tmp_path: Path):
     """The isolation itself works: code run the way the verifier runs the agent is unprivileged
     (uid 65534) and cannot write the reward path."""
-    # Ensure the reward path exists and is root-owned (as it is under test.sh) before probing.
     os.makedirs("/logs/verifier", exist_ok=True)
     reward = Path("/logs/verifier/reward.txt")
     if not reward.exists():
         reward.write_text("0")
-    os.chmod("/logs/verifier", 0o755)
-    os.chmod(reward, 0o644)
-    probe = _candidate_dir() / "probe.py"
+    # The channel's modes are left exactly as test.sh set them: this asserts the
+    # isolation that is really in force rather than relaxing it to be measured.
+    #
+    # The probe lives in a root-owned directory the candidate uid can read and
+    # execute but not write, so nothing the graded program left behind in the
+    # shared work area can stand in for it.
+    probe_dir = Path("/probe-work")
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(probe_dir, 0o755)
+    probe = probe_dir / "probe.py"
     probe.write_text(
         "import os\n"
         "print(os.getuid())\n"
-        "open('/logs/verifier/reward.txt', 'w').write('1')\n",
+        "try:\n"
+        "    open('/logs/verifier/reward.txt').read()\n"
+        "    print('readable')\n"
+        "except OSError:\n"
+        "    print('unreadable')\n"
+        "try:\n"
+        "    open('/logs/verifier/reward.txt', 'w').write('1')\n"
+        "    print('writable')\n"
+        "except OSError:\n"
+        "    print('unwritable')\n",
         encoding="utf-8",
     )
     os.chmod(probe, 0o644)
     res = subprocess.run(
         _SETPRIV + [sys.executable, str(probe)],
-        capture_output=True, text=True, cwd=str(_CWORK), check=False,
+        capture_output=True, text=True, cwd=str(probe_dir), check=False,
     )
-    assert res.stdout.strip().splitlines()[0] == "65534", "submitted program must run as uid 65534"
-    assert res.returncode != 0 and "Permission denied" in res.stderr, (
-        "unprivileged submitted program must not be able to write the reward path"
-    )
+    assert res.returncode == 0, res.stderr[-2000:]
+    assert res.stdout.splitlines() == ["65534", "unreadable", "unwritable"], res.stdout
 
 
 # --------------------------------------------------------------------------
