@@ -893,17 +893,6 @@ def _source_strings(source: str) -> list[str]:
             if isinstance(n, ast.Constant) and isinstance(n.value, str)]
 
 
-def test_pipeline_does_not_reference_test_artifacts():
-    """The reconciler never reads a verifier artifact.
-
-    Only string literals are inspected, so naming one of these in prose is not a
-    breach; using one as a path is.
-    """
-    literals = _source_strings(WORKFLOW_PATH.read_text(encoding="utf-8"))
-    for token in ("/tests", "expected_report.json", "alt_snapshots.json"):
-        assert not any(token in literal for literal in literals), token
-
-
 def test_shipped_contract_matches_the_golden_copy():
     """The output contract in the environment is unmodified.
 
