@@ -120,14 +120,78 @@ def _publish_inputs() -> None:
     read access first.
     """
     for path in sorted(DATA_DIR.rglob("*")):
+        # Never chmod through a link. The agent writes under /app/data, so a link
+        # planted there would otherwise have root widen its TARGET -- and a link
+        # pointing into /tests would reopen the sealed fixtures to the uid the
+        # graded program runs as, handing it the expected answers. is_symlink()
+        # stats the link itself; os.chmod's follow_symlinks=False is not available
+        # on Linux, which has no lchmod, and raises NotImplementedError instead.
+        if path.is_symlink():
+            continue
         try:
             os.chmod(path, 0o755 if path.is_dir() else 0o644)
         except OSError:
             pass
+    if not DATA_DIR.is_symlink():
+        try:
+            os.chmod(DATA_DIR, 0o755)
+        except OSError:
+            pass
+
+
+def test_publishing_inputs_does_not_chmod_through_a_planted_link():
+    """A link under /app/data cannot make root widen what it points at.
+
+    _publish_inputs runs as root over a directory the agent controls, so a link
+    planted there and aimed at /tests would otherwise have the sealed fixtures
+    opened to the unprivileged uid the graded program runs as. Written as a live
+    attempt rather than an inspection of the loop, so it keeps holding if the
+    loop is rewritten.
+    """
+    target = EXPECTED_FIXTURE
+    target_dir = target.parent
+    before_file = target.stat().st_mode
+    before_dir = target_dir.stat().st_mode
+
+    planted_file = DATA_DIR / "planted-link.json"
+    planted_dir = DATA_DIR / "planted-dir-link"
+    for link in (planted_file, planted_dir):
+        if link.is_symlink() or link.exists():
+            link.unlink()
+    planted_file.symlink_to(target)
+    planted_dir.symlink_to(target_dir)
     try:
-        os.chmod(DATA_DIR, 0o755)
-    except OSError:
-        pass
+        _publish_inputs()
+        assert target.stat().st_mode == before_file, (
+            "root chmod followed a planted link and widened a sealed fixture")
+        assert target_dir.stat().st_mode == before_dir, (
+            "root chmod followed a planted link and widened the fixture directory")
+        assert planted_file.is_symlink() and planted_dir.is_symlink()
+    finally:
+        for link in (planted_file, planted_dir):
+            if link.is_symlink() or link.exists():
+                link.unlink()
+
+    # And the fixtures are still out of reach of the uid the graded program uses.
+    probe_dir = Path("/probe-work")
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(probe_dir, 0o755)
+    probe = probe_dir / "read_fixture.py"
+    probe.write_text(
+        "import sys\n"
+        "try:\n"
+        "    open(sys.argv[1]).read()\n"
+        "    print('readable')\n"
+        "except OSError:\n"
+        "    print('unreadable')\n",
+        encoding="utf-8")
+    os.chmod(probe, 0o644)
+    result = subprocess.run(
+        _SETPRIV + [sys.executable, str(probe), str(target)],
+        capture_output=True, text=True, cwd=str(probe_dir), check=False)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.strip() == "unreadable", (
+        f"the sealed fixture is readable to the candidate uid: {result.stdout!r}")
 
 
 def _candidate_dir() -> Path:
