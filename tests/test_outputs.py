@@ -137,6 +137,18 @@ def _publish_inputs() -> None:
             os.chmod(DATA_DIR, 0o755)
         except OSError:
             pass
+    # The reconciler itself is agent-produced too, and the graded run reads it as
+    # uid 65534. An atomic write leaves it mode 0600 and owned by root --
+    # tempfile.mkstemp creates exactly that -- so without this a correct solution
+    # that installed its program the careful way would be unreadable at grade time
+    # and fail every test for a reason nothing in the task states.
+    for path in (WORKFLOW_PATH.parent, WORKFLOW_PATH):
+        if path.is_symlink():
+            continue
+        try:
+            os.chmod(path, 0o755 if path.is_dir() else 0o644)
+        except OSError:
+            pass
 
 
 def test_data_dir_is_read_only_to_the_graded_reconciler():
