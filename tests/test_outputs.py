@@ -139,6 +139,68 @@ def _publish_inputs() -> None:
             pass
 
 
+def test_data_dir_is_read_only_to_the_graded_reconciler():
+    """The reconciler cannot write under /app/data, and says so when it tries.
+
+    _publish_inputs leaves /app/data root-owned before the graded program drops to
+    uid 65534, so a reconciler that folds the recovery into its own run and
+    rewrites snapshots.json dies on PermissionError. Without this test that
+    failure surfaces as a couple of dozen unrelated errors with nothing naming the
+    cause; instruction.md states the constraint and this pins it with a readable
+    message.
+    """
+    _publish_inputs()
+    probe_dir = Path("/probe-work")
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(probe_dir, 0o755)
+    probe = probe_dir / "write_data.py"
+    probe.write_text(
+        "import sys\n"
+        "try:\n"
+        "    open('/app/data/snapshots.json', 'a').close()\n"
+        "    print('writable')\n"
+        "except PermissionError:\n"
+        "    print('refused')\n",
+        encoding="utf-8")
+    os.chmod(probe, 0o644)
+    result = subprocess.run(
+        _SETPRIV + [sys.executable, str(probe)],
+        capture_output=True, text=True, cwd=str(probe_dir), check=False)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.strip() == "refused", (
+        "the graded reconciler can write under /app/data, so an engine that "
+        "rebuilds the inventory in its own run would be graded as correct "
+        f"instead of refused: {result.stdout!r}")
+
+
+def test_a_reconciler_that_rewrites_the_inventory_fails_readably():
+    """Folding the recovery into the reconciler fails, and names why.
+
+    This is the trap the instruction now warns about, exercised end to end: a
+    reconciler whose first act is to rewrite /app/data/snapshots.json is run the
+    way the graded one is, and must fail with PermissionError naming that path
+    rather than producing artifacts.
+    """
+    _publish_inputs()
+    work = _candidate_dir()
+    rogue = work / "rewrites_the_inventory.py"
+    rogue.write_text(
+        "import json, pathlib\n"
+        "rows = json.loads(pathlib.Path('/app/data/snapshots.json').read_text())\n"
+        "pathlib.Path('/app/data/snapshots.json').write_text(json.dumps(rows))\n"
+        "print('rewrote the inventory')\n",
+        encoding="utf-8")
+    os.chmod(rogue, 0o644)
+    result = subprocess.run(
+        _SETPRIV + [sys.executable, str(rogue)],
+        capture_output=True, text=True, cwd=str(work), check=False)
+    assert result.returncode != 0, (
+        "a reconciler rewriting /app/data/snapshots.json was allowed to; the "
+        "recovery is the first step's write, not the reconciler's")
+    assert "PermissionError" in result.stderr, result.stderr[-2000:]
+    assert "/app/data/snapshots.json" in result.stderr, result.stderr[-2000:]
+
+
 def test_publishing_inputs_does_not_chmod_through_a_planted_link():
     """A link under /app/data cannot make root widen what it points at.
 

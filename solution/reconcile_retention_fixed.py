@@ -90,7 +90,11 @@ def collapse_ws(value: object) -> str:
 
 def coerce_int(value: object) -> int:
     if isinstance(value, bool):
-        return int(value)
+        # The contract's chain has no boolean case, and running a bool through it
+        # fails twice: int("True") raises and int(float("True")) raises, so the
+        # documented answer is 0. Returning int(value) here gave 1 instead, which
+        # is the one place the reference disagreed with report_spec.json.
+        return 0
     if isinstance(value, int):
         return value
     text = str(value).strip()
@@ -99,7 +103,9 @@ def coerce_int(value: object) -> int:
     except ValueError:
         try:
             return int(float(text))
-        except ValueError:
+        except (ValueError, OverflowError):
+            # "on failure 0" covers both ways the second conversion fails: "n/a"
+            # raises ValueError, while "1e999" parses as inf and raises Overflow.
             return 0
 
 
@@ -427,12 +433,16 @@ def select_pruned(segments: list[list[dict]], cap: int) -> set:
         reach = len(sums) - 1
         limit = min(capacity, reach)
         target = rows[index][capacity]
+        # #RET-7184: where two selections are level, THE EARLIER RUN GIVES WAY
+        # FIRST. Runs are walked in that order, so a positive cut here is tried
+        # before skipping: the previous form checked skipping first and only
+        # searched when skipping missed the target, which pushed the cut into a
+        # later run and did the opposite of the rule it cited.
         chosen = 0
-        if rows[index + 1][capacity] != target:
-            for take in range(1, limit + 1):
-                if rows[index + 1][capacity - take] + sums[take] * unit - take == target:
-                    chosen = take
-                    break
+        for take in range(1, limit + 1):
+            if rows[index + 1][capacity - take] + sums[take] * unit - take == target:
+                chosen = take
+                break
         if chosen:
             for row in segment[len(segment) - chosen:]:
                 pruned.add(row["snapshot_id"])

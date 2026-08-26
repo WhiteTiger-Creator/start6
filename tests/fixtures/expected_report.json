@@ -29,44 +29,44 @@
     }
   },
   "broken_pipeline_sha256": "3d815b9d26eb9fe853bec3462d1b2499b6416e705e5169426045cab7adb64d88",
-  "catalogue_digest": "c48143b789e527264daf020079ad618b84ae640b259b29cbb2bd703b5fc7927f",
+  "catalogue_digest": "47dbe48ce5ac633971d1d6dcee855aff979f109beae5e53ceb09c8d4478ab116",
   "input_bytes_sha256": {
     "pin_registry.json": "1ed46dbef68f6ea59fe71a169712743c16f39841ee592f4ffea4ea5015803b56",
     "retention_policy.json": "3168f954590efd04fe5eb2d80bd3de11d3010162185b8481a4f6e28f9ee2a90e",
-    "snapshot_catalogue_pre_incident.json": "b32d5be4cf4183225cfc3af03159475741410ccf21f7702214c73d7b0266de84",
+    "snapshot_catalogue_pre_incident.json": "191eddf19b18b25a055a5e4a33523b2b718a77bbe65342016d375dce7b66e83e",
     "snapshot_replay_journal.json": "e8b742d5e491ba38e2ce7e59f5d64a8b29fecdf6d79916a51b6949b95dcf8fdd"
   },
   "journal_digest": "08581a091fbb7d681d20db1b42cbe898f4feca4a4cb3d2d021583a6781bb0e3d",
   "primary": {
-    "decision_count": 78000,
-    "decisions_digest": "5cfd087949feae8841dc28866456334b727847eb294881c2e9cf66837f08a165",
-    "state_digest": "2b733126bb9b64e674102a0ed604442c3e4782f4c55a0441eb2dc971461842c9",
+    "decision_count": 78003,
+    "decisions_digest": "f0fa4154e88e6ced597d69214a2cd1b13179dbe573a5a788c41f7aa7aeb4b0c2",
+    "state_digest": "e51b469ee041b1144022c87a160a440e9b23eed3dc1ef778ab1ade8ebed0f9ab",
     "summary": {
-      "canonical_snapshot_count": 78000,
+      "canonical_snapshot_count": 78003,
       "decision_counts": {
-        "defer": 71536,
-        "keep": 5064,
+        "defer": 71542,
+        "keep": 5061,
         "prune": 1400
       },
-      "deferred_count": 71536,
-      "deferred_size_bytes": 325271021000000,
-      "held_count": 5006,
-      "kept_count": 5064,
-      "kept_size_bytes": 23192277000000,
+      "deferred_count": 71542,
+      "deferred_size_bytes": 325298368000000,
+      "held_count": 5007,
+      "kept_count": 5061,
+      "kept_size_bytes": 23171847000000,
       "max_overlap_count": 2106,
       "max_peak_depth": 1085,
       "max_quota_used": 100000,
       "pruned_count": 1400,
-      "raw_snapshot_count": 78900,
-      "reclaimed_size_bytes": 10989722000000,
+      "raw_snapshot_count": 78903,
+      "reclaimed_size_bytes": 10986805000000,
       "repo_count": 5,
       "schema_version": "retention-gfs-v1",
       "selected_bucket_count": 67,
-      "total_size_bytes": 359453020000000,
-      "unique_snapshot_ids": 78000
+      "total_size_bytes": 359457020000000,
+      "unique_snapshot_ids": 78003
     }
   },
-  "recovered_count": 78900,
-  "recovered_digest": "d43d206c7d4416f0a208fd04bfcec4e2b3fa93f07b16bb63f7211dfbaeddde66",
+  "recovered_count": 78903,
+  "recovered_digest": "9c763a5270ae0b98ec3d96b3658573ff634cf940c91d81da0c09cdcb7c9ee8c0",
   "shipped_truncated_digest": "77ac962fb8b4cf52c7be04040a9de7a9c2ccc4a6e4366fc4646fd38f58035190"
 }
