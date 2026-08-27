@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 
@@ -269,8 +270,18 @@ def test_publishing_inputs_does_not_chmod_through_a_planted_link():
 
 
 def _candidate_dir() -> Path:
-    d = _CWORK / f"run-{next(_run_ctr)}"
-    d.mkdir(parents=True, exist_ok=True)
+    """A fresh work area for one graded run, created where nothing can pre-empt it.
+
+    /candidate-work is world-writable, so a predictable name here was an opening:
+    a submission could plant `run-7` as a symlink to /tests/fixtures and wait. The
+    next root-side mkdir(exist_ok=True) would succeed through the link and the
+    chmod that follows would open the sealed fixtures to the candidate uid, since
+    os.chmod resolves symlinks and Linux offers no lchmod to stop it. mkdtemp
+    fixes both halves: the name is unpredictable and the directory is created
+    fresh or not at all, never adopted from something already sitting there.
+    """
+    d = Path(tempfile.mkdtemp(prefix=f"run-{next(_run_ctr)}-", dir=str(_CWORK)))
+    assert not d.is_symlink(), d
     os.chmod(d, 0o777)
     return d
 
@@ -301,6 +312,24 @@ def _run_pipeline(tmp_path: Path, script_path: Path = WORKFLOW_PATH, input_path:
     state = _load_json(out_dir / "retention_state.json")
     decisions = _load_jsonl(out_dir / "retention_decisions.jsonl")
     return out_dir, summary, state, decisions
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _clear_the_default_output_dir():
+    """Empty /app/output before anything is graded.
+
+    solve.sh leaves a correct summary.json, retention_state.json and
+    retention_decisions.jsonl sitting at the default path. Every graded run is
+    given an explicit --output-dir, so a reconciler that derived nothing could
+    copy those three across instead and match the sealed fixtures. Clearing the
+    directory up front means there is nothing there to copy: the artifacts a run
+    is graded on have to come from the input it was handed. The later
+    CLI-defaults test rebuilds the directory for its own no-argument run.
+    """
+    default_out = Path("/app/output")
+    shutil.rmtree(default_out, ignore_errors=True)
+    default_out.mkdir(parents=True, exist_ok=True)
+    os.chmod(default_out, 0o777)
 
 
 @pytest.fixture(scope="session")
@@ -846,6 +875,41 @@ def test_pipeline_supports_alternate_input(tmp_path: Path):
     assert summary == FIXTURE["alternate"]["summary"]
     assert _digest(state) == FIXTURE["alternate"]["state_digest"]
     assert _digest(decisions) == FIXTURE["alternate"]["decisions_digest"]
+
+
+def test_a_run_derives_its_artifacts_rather_than_copying_the_delivered_ones(tmp_path: Path):
+    """The graded artifacts have to come from the input, not from /app/output.
+
+    solve.sh leaves a correct set of artifacts at the default path, and every
+    graded run is given an explicit --output-dir, so copying the three files
+    across would have matched every sealed fixture without reconciling anything.
+    The session clears that directory before grading; this plants decoys in it
+    and requires the run to disagree with them, which fails a copy however it is
+    spelled.
+    """
+    default_out = Path("/app/output")
+    decoys = {
+        "summary.json": '{"schema_version": "decoy"}\n',
+        "retention_state.json": '{"decoy": true}\n',
+        "retention_decisions.jsonl": '{"decoy":true}\n',
+    }
+    try:
+        default_out.mkdir(parents=True, exist_ok=True)
+        os.chmod(default_out, 0o777)
+        for name, body in decoys.items():
+            path = default_out / name
+            path.write_text(body, encoding="utf-8")
+            os.chmod(path, 0o644)
+
+        _, summary, state, decisions = _run_pipeline(tmp_path / "not_a_copy")
+        assert summary == FIXTURE["primary"]["summary"], "the run did not reconcile its own summary"
+        assert _digest(state) == FIXTURE["primary"]["state_digest"]
+        assert _digest(decisions) == FIXTURE["primary"]["decisions_digest"]
+        assert summary.get("schema_version") != "decoy"
+    finally:
+        shutil.rmtree(default_out, ignore_errors=True)
+        default_out.mkdir(parents=True, exist_ok=True)
+        os.chmod(default_out, 0o777)
 
 
 def test_cli_defaults_work_and_match_explicit_run(tmp_path: Path):
