@@ -86,7 +86,21 @@ def _load_json(path: Path):
 
 
 def _load_jsonl(path: Path):
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    """Read a contracted JSONL artifact, taking every line as written.
+
+    Skipping blank lines here softened a contract that says one compact object
+    per line: a run that padded its output with empty lines read back the same
+    as a clean one and scored full marks. A blank line is a malformed line and
+    is read as one.
+    """
+    text = Path(path).read_text(encoding="utf-8")
+    if not text:
+        return []
+    assert text.endswith("\n"), f"{Path(path).name} has no trailing newline"
+    lines = text.split("\n")[:-1]
+    for number, line in enumerate(lines, start=1):
+        assert line.strip(), f"{Path(path).name} line {number} is blank"
+    return [json.loads(line) for line in lines]
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -624,8 +638,9 @@ def test_decisions_required_fields_and_compact(primary_outputs):
             assert row["roles"] == []
             assert (row["idle_gap"], row["carry_in"], row["used_quota"]) == (0, 0, 0)
     for line in (out_dir / "retention_decisions.jsonl").read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
+        # a blank line is not skipped here: the contract says one compact
+        # object per line, so an empty one is a malformed line
+        assert line.strip(), "the queue carries a blank line"
         assert ": " not in line
         assert json.dumps(json.loads(line), separators=(",", ":")) == line
 

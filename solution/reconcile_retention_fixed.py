@@ -184,6 +184,8 @@ def load_holds(pin_rows: list[dict]) -> dict[tuple[str, str], str]:
         if hold not in RECOGNIZED_HOLDS:
             continue
         key = (repo, sid)
+        # #RET-7124: the strictest recognized hold is the one reported, and
+        # compliance/legal/manual rank in that order, which is their own.
         if key not in holds or hold < holds[key]:
             holds[key] = hold
     return holds
@@ -438,8 +440,12 @@ def select_pruned(segments: list[list[dict]], cap: int) -> set:
         # before skipping: the previous form checked skipping first and only
         # searched when skipping missed the target, which pushed the cut into a
         # later run and did the opposite of the rule it cited.
+        # ...and giving way first means giving up as much as the tie allows, so
+        # the DEEPEST cut that still reaches the target wins. Walking upwards
+        # took the shallowest one instead, which left the same bytes and the
+        # same count to be found in a later run -- the opposite of the rule.
         chosen = 0
-        for take in range(1, limit + 1):
+        for take in range(limit, 0, -1):
             if rows[index + 1][capacity - take] + sums[take] * unit - take == target:
                 chosen = take
                 break
