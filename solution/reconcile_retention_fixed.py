@@ -607,7 +607,13 @@ def run(input_path: str, output_dir: str) -> None:
     summary = {
         "schema_version": SCHEMA_VERSION,
         "raw_snapshot_count": len(raw_rows),
-        "unique_snapshot_ids": len({collapse_ws(r.get("snapshot_id", "")) for r in raw_rows}),
+        # report_spec.json carries snapshot_id as the plain source string and the
+        # #RET-7101 coercions do not name it, so two ids differing only in their
+        # spacing are two ids here as they are everywhere else. Collapsing them
+        # for this count alone made the summary disagree with the decisions it
+        # describes -- the canonical rows and the dedup key were left uncollapsed
+        # when that rule was settled, and this line was missed.
+        "unique_snapshot_ids": len({str(r.get("snapshot_id", "")) for r in raw_rows}),
         "canonical_snapshot_count": len(canon_rows),
         "repo_count": len(by_repo),
         "held_count": sum(1 for r in canon_rows if r["_held"]),

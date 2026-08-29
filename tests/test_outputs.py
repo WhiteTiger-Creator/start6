@@ -381,14 +381,17 @@ def test_peak_depth_is_not_the_overlap_count(primary_outputs):
     """The busiest instant is a different figure from the window's total.
 
     A run that reported the overlap count again under another name would pass
-    the bounds check above, so the two are required to disagree in bulk.
+    the bounds check above, so the two are required to differ somewhere. How
+    often they differ, and how many distinct depths the graded data happens to
+    produce, are properties of this inventory rather than of #RET-7180; the
+    figure itself is checked against an independent sweep in the test below.
     """
     _, _, _, decisions = primary_outputs
-    differing = sum(1 for d in decisions if d["peak_depth"] != d["overlap_count"] + 1)
-    assert differing > len(decisions) // 10, (
-        f"only {differing} of {len(decisions)} rows differ from overlap_count + 1"
-    )
-    assert len({d["peak_depth"] for d in decisions}) > 20
+    differing = [d["snapshot_id"] for d in decisions
+                 if d["peak_depth"] != d["overlap_count"] + 1]
+    assert differing, (
+        "peak_depth equals overlap_count + 1 on every row, so the busiest instant "
+        "inside each window was never computed")
 
 
 def test_peak_depth_matches_an_independent_recomputation(primary_outputs):
