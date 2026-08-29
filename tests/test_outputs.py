@@ -427,10 +427,37 @@ def test_peak_depth_matches_an_independent_recomputation(primary_outputs):
     assert checked >= 10
 
 
-def test_overlap_varies_across_the_inventory(primary_outputs):
-    """A constant overlap would mean the protection windows were never compared."""
-    counts = {d["overlap_count"] for d in primary_outputs[3]}
-    assert len(counts) > 50, f"only {len(counts)} distinct overlap counts"
+def test_overlap_matches_an_independent_recomputation(primary_outputs):
+    """Recounted here pairwise, which shares no code with the pipeline.
+
+    #RET-7172 counts the OTHER canonical snapshots of the same repo whose
+    protection window intersects this one, endpoints included. Counting the
+    intersections directly on a sampled repo is evidence, where the previous
+    form only asked for more than fifty distinct values across the inventory --
+    a property of the graded data that no decision states.
+    """
+    _, _, _, decisions = primary_outputs
+    by_repo: dict[str, list[dict]] = {}
+    for row in decisions:
+        by_repo.setdefault(row["repo"], []).append(row)
+
+    repo = min(by_repo, key=lambda name: len(by_repo[name]))
+    span = int(_resolve(repo, json.loads(POLICY_PATH.read_text()))["protection_days"]) * 86400
+    rows = sorted(by_repo[repo], key=lambda r: r["ts"])
+    checked = 0
+    for row in rows[:: max(1, len(rows) // 40)][:40]:
+        low, high = row["ts"], row["ts"] + span
+        expected = sum(
+            1 for other in rows
+            if other["snapshot_id"] != row["snapshot_id"]
+            and other["ts"] <= high and low <= other["ts"] + span
+        )
+        assert row["overlap_count"] == expected, (
+            f"{row['snapshot_id']}: reported {row['overlap_count']}, counted {expected}")
+        checked += 1
+    assert checked, "no decision was checked"
+    # and the figure is not a constant the engine never actually computed
+    assert len({d["overlap_count"] for d in decisions}) > 1
 
 
 def test_overlap_is_scoped_to_the_repo(primary_outputs):
@@ -821,8 +848,12 @@ def test_prune_selection_reclaims_the_most_the_cap_allows(primary_outputs):
 def test_chain_respecting_greedy_falls_short_of_the_optimum(primary_outputs):
     """A legal greedy really does reclaim less on this inventory.
 
-    If taking whole runs by bytes per snapshot already reached the optimum,
-    requiring the optimum would prove nothing here, so the gap is asserted.
+    This guards the shipped data rather than the submission: if taking whole
+    runs by bytes per snapshot already reached the optimum everywhere, then
+    requiring the optimum would prove nothing and the crux would be gone. One
+    repo where the greedy falls short is what makes the requirement bite, so
+    that is what is asserted -- the previous form demanded three, a count no
+    decision states and only true of this particular inventory.
     """
     _, _, _, decisions = primary_outputs
     policy_data = _load_json(POLICY_PATH)
@@ -846,8 +877,9 @@ def test_chain_respecting_greedy_falls_short_of_the_optimum(primary_outputs):
             greedy += total
         if greedy < _best_reclaim(runs, cap):
             shortfalls += 1
-    assert shortfalls >= 3, (
-        f"the greedy selection matched the optimum on all but {shortfalls} repos"
+    assert shortfalls >= 1, (
+        "the chain-respecting greedy reached the optimum on every repo, so requiring "
+        "the optimum no longer distinguishes it from a heuristic"
     )
 
 

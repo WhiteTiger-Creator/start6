@@ -189,6 +189,11 @@
         "order": "ascending",
         "type": "array"
       }
+    },
+    "field_notes": {
+      "daily/weekly/monthly/yearly/pinned": "the snapshot ids the repo keeps in that role, ascending",
+      "kept_count": "how many snapshots the repo keeps in total",
+      "quota_used": "the GREATEST used_quota among the repo's kept snapshots -- the high-water mark the ledger reached over what survived, not a sum and not the value at the last one"
     }
   },
   "runtime_budget_seconds": 120,
@@ -220,7 +225,21 @@
       "max_overlap_count",
       "max_peak_depth"
     ],
-    "schema_version": "retention-gfs-v1"
+    "schema_version": "retention-gfs-v1",
+    "field_notes": {
+      "raw_snapshot_count": "records read from the inventory before canonicalisation",
+      "canonical_snapshot_count": "records that survive canonicalisation and deduplication, so one row per decision",
+      "unique_snapshot_ids": "distinct snapshot ids among those",
+      "kept_count/pruned_count/deferred_count": "decisions of each kind",
+      "total_size_bytes/kept_size_bytes/reclaimed_size_bytes/deferred_size_bytes": "stored bytes over all decisions, over the kept, over the pruned and over the deferred",
+      "held_count": "decisions carrying a hold",
+      "repo_count": "repos in retention_state.json",
+      "selected_bucket_count": "how many role slots the repos fill across daily, weekly, monthly and yearly, counted per snapshot per role, so one snapshot filling two roles counts twice",
+      "max_quota_used": "the greatest used_quota among all kept snapshots, over every repo",
+      "max_overlap_count": "the greatest overlap_count on any decision",
+      "max_peak_depth": "the greatest peak_depth on any decision",
+      "decision_counts": "the per-kind counts again, keyed by decision"
+    }
   },
   "workflow_repair": {
     "cli_usage": "python3 /app/workflow/reconcile_retention.py --input PATH --output-dir PATH",
