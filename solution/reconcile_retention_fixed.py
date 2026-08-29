@@ -125,7 +125,11 @@ def canonicalize(raw_rows: list[dict]) -> list[dict]:
     for row in raw_rows:
         canon.append(
             {
-                "snapshot_id": collapse_ws(row.get("snapshot_id", "")),
+                # #RET-7101 lists coercions for repo, vault, note, size_bytes, ts and
+                # pinned, and pointedly not for snapshot_id, which report_spec.json
+                # carries as a plain string. Collapsing it here would have merged two
+                # contract-valid ids that differ only in their spacing.
+                "snapshot_id": str(row.get("snapshot_id", "")),
                 "repo": canon_name(row.get("repo", "")),
                 "vault": canon_name(row.get("vault", row.get("tier", ""))),
                 "ts": coerce_int(row.get("ts", 0)),
@@ -179,7 +183,7 @@ def load_holds(pin_rows: list[dict]) -> dict[tuple[str, str], str]:
     holds: dict[tuple[str, str], str] = {}
     for row in pin_rows:
         repo = canon_name(row.get("repo", ""))
-        sid = collapse_ws(row.get("snapshot_id", ""))
+        sid = str(row.get("snapshot_id", ""))
         hold = str(row.get("hold", "")).strip().lower()
         if hold not in RECOGNIZED_HOLDS:
             continue

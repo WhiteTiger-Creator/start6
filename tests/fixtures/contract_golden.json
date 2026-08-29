@@ -118,7 +118,7 @@
     "shape": "{\"default\": {field: int, ...}, \"repo_overrides\": {repo: {field: int, ...}, ...}}"
   },
   "retention_decisions_jsonl": {
-    "container": "one compact JSON object per line, json.dumps(..., separators=(',', ':'))",
+    "container": "one compact JSON object per line, json.dumps(..., separators=(',', ':')), each line ended by a newline including the last, and no blank line anywhere",
     "output_path": "retention_decisions.jsonl",
     "required_fields": [
       "snapshot_id",
@@ -141,7 +141,8 @@
       "used_quota",
       "overlap_count",
       "peak_depth"
-    ]
+    ],
+    "snapshot_id_note": "snapshot_id is carried through as the plain string the source holds; the #RET-7101 coercions do not name it and it is not whitespace-collapsed"
   },
   "retention_state_json": {
     "container": "object keyed by normalized repo, each value an object with the keys below",

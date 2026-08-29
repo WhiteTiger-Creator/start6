@@ -524,15 +524,28 @@ def test_cli_exists(primary_outputs):
     assert WORKFLOW_PATH.exists()
     out_dir, _, _, _ = primary_outputs
     assert out_dir != Path("/app/output"), "the graded run must use the directory it was given"
-    assert sorted(q.name for q in out_dir.iterdir() if q.is_file()) == [
-        "retention_decisions.jsonl", "retention_state.json", "summary.json"]
+    assert _everything_under(out_dir) == CONTRACT_OUTPUT_NAMES
+
+
+CONTRACT_OUTPUT_NAMES = [
+    "retention_decisions.jsonl", "retention_state.json", "summary.json"]
+
+
+def _everything_under(out_dir: Path) -> list[str]:
+    """Every entry in the output directory, directories included, recursively.
+
+    These checks used to filter on is_file(), which let a run drop an extra
+    directory beside the three contracted artifacts and still be graded as
+    having written exactly three files. Nothing is filtered here, so a stray
+    cache/ or a file hidden inside one is caught.
+    """
+    return sorted(str(q.relative_to(out_dir)) for q in out_dir.rglob("*"))
 
 
 def test_output_dir_contains_exactly_three_files(primary_outputs):
     """A run writes exactly the three contracted files and nothing else."""
     out_dir, _, _, _ = primary_outputs
-    names = sorted(p.name for p in out_dir.iterdir() if p.is_file())
-    assert names == ["retention_decisions.jsonl", "retention_state.json", "summary.json"]
+    assert _everything_under(out_dir) == CONTRACT_OUTPUT_NAMES
 
 
 def test_primary_summary_matches_fixture(primary_outputs):
@@ -938,8 +951,7 @@ def test_cli_defaults_work_and_match_explicit_run(tmp_path: Path):
     os.chmod(default_out, 0o777)
     _publish_inputs()
     _run_agent([sys.executable, str(WORKFLOW_PATH)], cwd=_candidate_dir())
-    assert sorted(q.name for q in default_out.iterdir()) == [
-        "retention_decisions.jsonl", "retention_state.json", "summary.json"]
+    assert _everything_under(default_out) == CONTRACT_OUTPUT_NAMES
     _, _, explicit_state, explicit_decisions = _run_pipeline(tmp_path / "again")
     assert _load_json(default_out / "summary.json") == explicit_summary
     assert _digest(_load_json(default_out / "retention_state.json")) == _digest(explicit_state)
