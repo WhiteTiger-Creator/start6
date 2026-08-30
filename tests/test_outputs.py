@@ -114,7 +114,98 @@ def _write_json(path: Path, value: object) -> None:
 # staged into a candidate-writable work area; policy files under /app keep their fixed paths.
 _CWORK = Path("/candidate-work")
 _run_ctr = itertools.count()
-_SETPRIV = ["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", "--no-new-privs"]
+CANDIDATE_UID = 65534
+def _setpriv_prefix(base: list) -> list:
+    """The strictest setpriv invocation this image actually supports.
+
+    Dropping the uid is not the whole of it: a candidate that kept inheritable
+    or bounding-set capabilities could regain privilege across an exec. The two
+    flags are probed rather than assumed, because a util-linux without them
+    would make every run fail on the flag rather than on the task.
+    """
+    strict = base + ["--inh-caps=-all", "--bounding-set=-all"]
+    try:
+        probe = subprocess.run(strict + ["/bin/true"], capture_output=True, timeout=30)
+        if probe.returncode == 0:
+            return strict
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return base
+
+
+# Resource ceilings for anything run as the candidate. Deliberately not
+# RLIMIT_AS or RLIMIT_DATA: a language runtime that reserves a large virtual
+# arena at start-up dies under those, so they would kill a correct program
+# rather than a runaway one. These bound the failure modes that actually escape
+# a process group -- forking without end, filling the disk, dumping core.
+_CANDIDATE_NPROC = 512
+_CANDIDATE_FSIZE = 512 * 1024 * 1024
+_CANDIDATE_NOFILE = 1024
+
+
+def _apply_rlimits() -> None:
+    """Run in the child between fork and exec: own session, plus ceilings."""
+    import resource
+
+    for what, limit in (
+        (resource.RLIMIT_NPROC, _CANDIDATE_NPROC),
+        (resource.RLIMIT_FSIZE, _CANDIDATE_FSIZE),
+        (resource.RLIMIT_NOFILE, _CANDIDATE_NOFILE),
+        (resource.RLIMIT_CORE, 0),
+    ):
+        try:
+            _soft, hard = resource.getrlimit(what)
+            ceiling = limit if hard == resource.RLIM_INFINITY else min(limit, hard)
+            resource.setrlimit(what, (ceiling, ceiling))
+        except (ValueError, OSError):
+            continue
+    os.setsid()
+
+
+def _pids_owned_by(uid: int) -> list:
+    """Every live pid whose owner is `uid`, read from /proc."""
+    pids = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            if os.stat("/proc/" + entry).st_uid == uid:
+                pids.append(int(entry))
+        except OSError:
+            continue
+    return pids
+
+
+def reap_candidate_uid(uid: int = CANDIDATE_UID) -> None:
+    """Kill everything still running as the candidate, whatever group it is in.
+
+    Killing the process group is not enough on its own: a submitted program can
+    call setsid and leave its own group, and would then survive into later tests
+    -- holding the staged inputs of the next run, or still writing into an
+    output directory being read. Ownership is the property that cannot be
+    escaped, so the sweep is by owner.
+    """
+    import signal as _signal
+    import time as _time
+
+    for _ in range(50):
+        pids = _pids_owned_by(uid)
+        if not pids:
+            return
+        for pid in pids:
+            try:
+                os.kill(pid, _signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                continue
+        for pid in pids:
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except (ChildProcessError, OSError):
+                continue
+        _time.sleep(0.02)
+
+
+_SETPRIV = _setpriv_prefix(["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", "--no-new-privs"])
 # The contract's own budget, enforced rather than documented: a run that
 # compares protection windows pairwise on these repos does not come back
 # inside it, and a timeout here is a failure exactly as the contract says.
@@ -305,7 +396,9 @@ def _run_agent(argv, cwd: Path):
     return subprocess.run(
         _SETPRIV + argv, check=True, capture_output=True, text=True, cwd=str(cwd),
         env=dict(_CANDIDATE_ENV), timeout=_RUN_TIMEOUT,
+        preexec_fn=_apply_rlimits,
     )
+    reap_candidate_uid()
 
 
 def _run_pipeline(tmp_path: Path, script_path: Path = WORKFLOW_PATH, input_path: Path = DEFAULT_INPUT):
@@ -848,6 +941,70 @@ def test_prune_selection_reclaims_the_most_the_cap_allows(primary_outputs):
         assert reclaimed.get(repo, 0) == _best_reclaim(runs, cap), repo
 
 
+def _tie_inventory() -> list:
+    """One repo, one vault, holding two candidate runs of identical shape.
+
+    Each cluster sits inside a single day, so only its bucket representative is
+    kept and the rest become candidates; the two clusters are far enough apart to
+    fall in different buckets at every tier, so each run has its own kept anchor.
+    The two runs carry the same sizes in the same order, so a cut of any depth
+    into one reclaims exactly what the same cut into the other does, with the
+    same snapshot count. That is the tie #RET-7184 settles, and the graded
+    inventory never produces one.
+    """
+    rows = []
+
+    def cluster(prefix, first_ts):
+        # four snapshots inside one day: the earliest is the representative
+        for i, size in enumerate((100_000_000, 500_000_000, 400_000_000, 300_000_000)):
+            rows.append({"snapshot_id": f"snap-tie-{prefix}{i}", "repo": "vault/tie",
+                         "vault": "hot", "ts": first_ts + i * 3600, "size_bytes": size,
+                         "pinned": False, "note": "tie probe"})
+
+    base = 1_780_000_000
+    cluster("a", base - 400 * 86400)
+    cluster("b", base - 200 * 86400)
+    return rows
+
+
+def test_the_prune_tie_break_decides_which_run_gives_way(tmp_path: Path):
+    """#RET-7184: level on bytes and on count, the EARLIER run gives way, deepest first.
+
+    Nothing graded this. Reversing the run order, or taking the shallowest cut
+    that still reaches the optimum, reproduced every sealed digest, so the rule
+    could be read either way and still pass. Here the two runs are identical in
+    shape and the cap admits only one of them, so which snapshots are pruned is
+    decided by the tie-break alone.
+    """
+    original = POLICY_PATH.read_text()
+    try:
+        data = json.loads(original)
+        # a cap that covers one run and not both, so the tie has to be settled
+        data.setdefault("repo_overrides", {})["vault/tie"] = {"prune_cap": 3}
+        POLICY_PATH.write_text(json.dumps(data, indent=2) + "\n")
+
+        staged = tmp_path / "tie_inventory.json"
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(staged, _tie_inventory())
+        os.chmod(staged, 0o644)
+        _, _summary, _state, decisions = _run_pipeline(tmp_path / "tie", input_path=staged)
+    finally:
+        POLICY_PATH.write_text(original)
+
+    pruned = {r["snapshot_id"] for r in decisions if r["decision"] == "prune"}
+    assert pruned, "the probe pruned nothing, so the tie-break was never reached"
+    assert len(pruned) <= 3, f"the per-repo cap was not applied: {sorted(pruned)}"
+    runs = _repo_runs(decisions).get("vault/tie", [])
+    assert len(runs) >= 2, f"the probe did not produce two runs to choose between: {runs}"
+
+    earlier = {row["snapshot_id"] for row in runs[0]}
+    later = {row["snapshot_id"] for row in runs[1]}
+    from_earlier, from_later = len(earlier & pruned), len(later & pruned)
+    assert from_earlier > from_later, (
+        "the cap was spent on the later run, so the earlier one did not give way "
+        f"first: {from_earlier} from the earlier against {from_later} from the later")
+
+
 def test_chain_respecting_greedy_falls_short_of_the_optimum(primary_outputs):
     """A legal greedy really does reclaim less on this inventory.
 
@@ -1178,3 +1335,4 @@ def test_shipped_contract_matches_the_golden_copy():
     # instruction.md promises this file comes back byte-identical too, not merely
     # equal once parsed.
     assert _file_sha256(SPEC_PATH) == _file_sha256(GOLDEN_CONTRACT_PATH)
+

@@ -28,9 +28,9 @@ DECISION_ORDER = ["keep", "prune", "defer"]
 
 # Draft/interim constants (pre-reversal): naive floor-division calendar.
 SECONDS_PER_DAY = 86400
-NAIVE_WEEK = 604800          # #RET-7004 draft: naive 7-day floor (Thursday phase)
-NAIVE_MONTH = 2592000        # #RET-7004 draft: naive 30-day floor, midnight
-NAIVE_YEAR = 31536000        # #RET-7004 draft: 365-day floor
+NAIVE_WEEK = 604800          # seven days
+NAIVE_MONTH = 2592000        # thirty days
+NAIVE_YEAR = 31536000        # three hundred and sixty-five days
 DECAY_DIV = 86400
 QUOTA_QUANTUM = 1048576
 
@@ -97,7 +97,7 @@ def canonicalize(raw_rows: list[dict]) -> list[dict]:
 
 
 def deduplicate(canon_rows: list[dict]) -> list[dict]:
-    # #RET-7109 draft: on a ts tie keep the HIGHER size (pre-#RET-7142 reversal).
+    # On a ts tie this keeps the larger of the two.
     best: dict[str, tuple] = {}
     order: dict[str, int] = {}
     for idx, row in enumerate(canon_rows):
@@ -111,7 +111,7 @@ def deduplicate(canon_rows: list[dict]) -> list[dict]:
 
 
 def bucket_ids(ts: int) -> dict[str, int]:
-    # #RET-7004 draft: naive midnight day boundary and floor-division periods.
+    # Buckets by floor division from midnight.
     return {
         "daily": ts // SECONDS_PER_DAY,
         "weekly": ts // NAIVE_WEEK,
@@ -135,7 +135,7 @@ def load_holds(pin_rows: list[dict]) -> dict[tuple[str, str], str]:
 
 
 def representative_key(row: dict) -> tuple:
-    # #RET-7006 draft: standard GFS keeps the LATEST snapshot per bucket.
+    # Keeps the latest snapshot in each bucket.
     return (-row["ts"], -row["size_bytes"], row["snapshot_id"])
 
 
@@ -160,14 +160,14 @@ def select_kept(repo_rows: list[dict], policy: dict) -> dict[str, dict]:
         for sid in tier_reps[tier]:
             info = kept.setdefault(sid, {"roles": [], "held": False, "hold": ""})
             info["roles"].append(tier)
-    # #RET-7024 draft: pinned holds are IGNORED (independent-tier standard GFS).
+    # Holds are not consulted here.
     for sid, info in kept.items():
         info["roles"] = [t for t in TIER_ORDER if t in info["roles"]]
     return kept
 
 
 def apply_ledger(kept_rows: list[dict], quota_cap: int) -> None:
-    # #RET-7115 draft: FLOOR decay and NO reset boundary.
+    # Decays by floor division, with no reset.
     prev_ts = None
     prev_quota = 0
     for row in kept_rows:
@@ -213,7 +213,7 @@ def run(input_path: str, output_dir: str) -> None:
     pin_rows = json.loads(Path(PIN_REGISTRY_PATH).read_text(encoding="utf-8"))
 
     canon_rows = deduplicate(canonicalize(raw_rows))
-    # #RET-7024 draft: registry holds are advisory only and change nothing.
+    # The registry is read but does not change the outcome.
     load_holds(pin_rows)
 
     for row in canon_rows:

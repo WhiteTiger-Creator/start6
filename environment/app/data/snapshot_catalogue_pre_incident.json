@@ -648547,5 +648547,41 @@
     "size_bytes": "2.5e9",
     "pinned": "yes",
     "note": "padded stamp and exponent size"
+  },
+  {
+    "snapshot_id": "snap-9100001",
+    "repo": "vault/pg",
+    "vault": "cold",
+    "ts": 1780024576,
+    "size_bytes": 4000000000,
+    "pinned": false,
+    "note": "watchdog re-emission"
+  },
+  {
+    "snapshot_id": "snap-9100001",
+    "repo": "vault/pg",
+    "vault": "cold",
+    "ts": 1780024576,
+    "size_bytes": 1500000000,
+    "pinned": false,
+    "note": "operator confirmed"
+  },
+  {
+    "snapshot_id": "snap-9100002",
+    "repo": "  VAULT/PG  ",
+    "vault": " Cold ",
+    "ts": 1780024677,
+    "size_bytes": 900000000,
+    "pinned": false,
+    "note": "mixed case"
+  },
+  {
+    "snapshot_id": "snap-9100003",
+    "repo": "Vault/Redis",
+    "vault": "HOT",
+    "ts": 1780024778,
+    "size_bytes": 800000000,
+    "pinned": false,
+    "note": "mixed case"
   }
 ]
