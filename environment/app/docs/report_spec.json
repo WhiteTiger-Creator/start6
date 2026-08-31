@@ -94,6 +94,10 @@
       "type": "integer"
     }
   },
+  "inventory_source": {
+    "path": "/app/data/snapshots.json",
+    "serialisation": "JSON array, two-space indent, trailing newline; each record carries its fields in the order the source lists them -- snapshot_id, repo, vault, ts, size_bytes, pinned, note -- and the key sorting the two report objects use does not apply here"
+  },
   "output_files": {
     "additional_files_allowed": false,
     "retention_decisions_jsonl": "retention_decisions.jsonl",
@@ -119,6 +123,7 @@
   },
   "retention_decisions_jsonl": {
     "container": "one compact JSON object per line, json.dumps(..., separators=(',', ':')), each line ended by a newline including the last, and no blank line anywhere",
+    "fields_are_exclusive": "the listed fields are the whole record: a row carries these and no others, the same way additional_files_allowed settles the output directory",
     "output_path": "retention_decisions.jsonl",
     "required_fields": [
       "snapshot_id",
@@ -142,11 +147,16 @@
       "overlap_count",
       "peak_depth"
     ],
-    "snapshot_id_note": "snapshot_id is carried through as the plain string the source holds; the #RET-7101 coercions do not name it and it is not whitespace-collapsed",
-    "fields_are_exclusive": "the listed fields are the whole record: a row carries these and no others, the same way additional_files_allowed settles the output directory"
+    "snapshot_id_note": "snapshot_id is carried through as the plain string the source holds; the #RET-7101 coercions do not name it and it is not whitespace-collapsed"
   },
   "retention_state_json": {
     "container": "object keyed by normalized repo, each value an object with the keys below",
+    "field_notes": {
+      "daily/weekly/monthly/yearly/pinned": "the snapshot ids the repo keeps in that role, ascending",
+      "kept_count": "how many snapshots the repo keeps in total",
+      "quota_used": "the GREATEST used_quota among the repo's kept snapshots -- the high-water mark the ledger reached over what survived, not a sum and not the value at the last one"
+    },
+    "fields_are_exclusive": "the listed fields are the whole record: a row carries these and no others, the same way additional_files_allowed settles the output directory",
     "key_sort": "ascending",
     "output_path": "retention_state.json",
     "required_fields": [
@@ -158,6 +168,7 @@
       "kept_count",
       "quota_used"
     ],
+    "serialisation": "JSON object, two-space indent, trailing newline; the outer object is keyed by repo in ascending order and each repo's object carries its keys in the order required_fields lists them, which is not alphabetical",
     "value_types": {
       "daily": {
         "items": "snapshot_id",
@@ -190,14 +201,7 @@
         "order": "ascending",
         "type": "array"
       }
-    },
-    "field_notes": {
-      "daily/weekly/monthly/yearly/pinned": "the snapshot ids the repo keeps in that role, ascending",
-      "kept_count": "how many snapshots the repo keeps in total",
-      "quota_used": "the GREATEST used_quota among the repo's kept snapshots -- the high-water mark the ledger reached over what survived, not a sum and not the value at the last one"
-    },
-    "fields_are_exclusive": "the listed fields are the whole record: a row carries these and no others, the same way additional_files_allowed settles the output directory",
-    "serialisation": "JSON object, two-space indent, keys sorted, trailing newline"
+    }
   },
   "runtime_budget_seconds": 120,
   "summary_json": {
@@ -207,6 +211,21 @@
       "prune",
       "defer"
     ],
+    "field_notes": {
+      "canonical_snapshot_count": "records that survive canonicalisation and deduplication, so one row per decision",
+      "decision_counts": "the per-kind counts again, keyed by decision",
+      "held_count": "decisions carrying a hold",
+      "kept_count/pruned_count/deferred_count": "decisions of each kind",
+      "max_overlap_count": "the greatest overlap_count on any decision",
+      "max_peak_depth": "the greatest peak_depth on any decision",
+      "max_quota_used": "the greatest used_quota among all kept snapshots, over every repo",
+      "raw_snapshot_count": "records read from the inventory before canonicalisation",
+      "repo_count": "repos in retention_state.json",
+      "selected_bucket_count": "how many role slots the repos fill across daily, weekly, monthly and yearly, counted per snapshot per role, so one snapshot filling two roles counts twice",
+      "total_size_bytes/kept_size_bytes/reclaimed_size_bytes/deferred_size_bytes": "stored bytes over all decisions, over the kept, over the pruned and over the deferred",
+      "unique_snapshot_ids": "distinct snapshot ids among the records read from the inventory, compared as the plain source strings they are: two ids differing only in their spacing are two ids, since the #RET-7101 coercions do not name snapshot_id"
+    },
+    "fields_are_exclusive": "the listed fields are the whole record: a row carries these and no others, the same way additional_files_allowed settles the output directory",
     "output_path": "summary.json",
     "required_fields": [
       "schema_version",
@@ -229,22 +248,7 @@
       "max_peak_depth"
     ],
     "schema_version": "retention-gfs-v1",
-    "field_notes": {
-      "raw_snapshot_count": "records read from the inventory before canonicalisation",
-      "canonical_snapshot_count": "records that survive canonicalisation and deduplication, so one row per decision",
-      "unique_snapshot_ids": "distinct snapshot ids among the records read from the inventory, compared as the plain source strings they are: two ids differing only in their spacing are two ids, since the #RET-7101 coercions do not name snapshot_id",
-      "kept_count/pruned_count/deferred_count": "decisions of each kind",
-      "total_size_bytes/kept_size_bytes/reclaimed_size_bytes/deferred_size_bytes": "stored bytes over all decisions, over the kept, over the pruned and over the deferred",
-      "held_count": "decisions carrying a hold",
-      "repo_count": "repos in retention_state.json",
-      "selected_bucket_count": "how many role slots the repos fill across daily, weekly, monthly and yearly, counted per snapshot per role, so one snapshot filling two roles counts twice",
-      "max_quota_used": "the greatest used_quota among all kept snapshots, over every repo",
-      "max_overlap_count": "the greatest overlap_count on any decision",
-      "max_peak_depth": "the greatest peak_depth on any decision",
-      "decision_counts": "the per-kind counts again, keyed by decision"
-    },
-    "fields_are_exclusive": "the listed fields are the whole record: a row carries these and no others, the same way additional_files_allowed settles the output directory",
-    "serialisation": "JSON object, two-space indent, keys sorted, trailing newline"
+    "serialisation": "JSON object, two-space indent, trailing newline; the object carries its keys in the order required_fields lists them and decision_counts carries its own in decision_counts_key_order, so neither is sorted alphabetically"
   },
   "workflow_repair": {
     "cli_usage": "python3 /app/workflow/reconcile_retention.py --input PATH --output-dir PATH",
@@ -255,9 +259,5 @@
       "retention_policy": "/app/data/retention_policy.json"
     },
     "path": "/app/workflow/reconcile_retention.py"
-  },
-  "inventory_source": {
-    "path": "/app/data/snapshots.json",
-    "serialisation": "JSON array, two-space indent, trailing newline; each record carries its fields in the order the source lists them -- snapshot_id, repo, vault, ts, size_bytes, pinned, note -- and the key sorting the two report objects use does not apply here"
   }
 }

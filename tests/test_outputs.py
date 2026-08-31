@@ -744,6 +744,54 @@ def test_summary_serialises_identically_to_the_contract(primary_outputs):
     assert _digest(primary_outputs[1]) == _digest(FIXTURE["primary"]["summary"])
 
 
+def test_the_artifacts_carry_their_keys_in_the_order_the_contract_states(
+        primary_outputs):
+    """Key order, read off the raw bytes rather than a parsed structure.
+
+    Every other check here parses first, and parsing throws key order away, so a
+    run emitting the right values in any order it liked matched every fixture.
+    The contract fixes three orders and none of them is alphabetical, so sorting
+    the keys is as wrong as shuffling them.
+    """
+    out = Path(primary_outputs[0])
+
+    raw = (out / "summary.json").read_text(encoding="utf-8")
+    ordered = json.loads(raw, object_pairs_hook=list)
+    assert [key for key, _ in ordered] == SPEC["summary_json"]["required_fields"], (
+        "summary.json does not carry its keys in the order required_fields lists")
+    counts = dict(ordered)["decision_counts"]
+    assert [key for key, _ in counts] == SPEC["summary_json"]["decision_counts_key_order"], (
+        "decision_counts does not carry its keys in the documented order")
+    assert raw.endswith("\n") and not raw.endswith("\n\n")
+    assert "\n  \"" in raw, "summary.json is not written at a two-space indent"
+
+    raw = (out / "retention_state.json").read_text(encoding="utf-8")
+    ordered = json.loads(raw, object_pairs_hook=list)
+    repos = [key for key, _ in ordered]
+    assert repos == sorted(repos), "the state's repos are not in ascending order"
+    expected = SPEC["retention_state_json"]["required_fields"]
+    for repo, entry in ordered:
+        assert [key for key, _ in entry] == expected, (
+            f"{repo} does not carry its keys in the order required_fields lists")
+    assert raw.endswith("\n") and not raw.endswith("\n\n")
+
+    # the rebuilt inventory is the one place the report orders do not apply
+    raw = DEFAULT_INPUT.read_text(encoding="utf-8")
+    records = json.loads(raw, object_pairs_hook=list)
+    source_order = ["snapshot_id", "repo", "vault", "ts", "size_bytes", "pinned", "note"]
+    for record in records[:200]:
+        assert [key for key, _ in record] == source_order, (
+            "a rebuilt inventory record does not carry the source field order")
+
+
+def test_the_contracted_orders_are_not_alphabetical():
+    """Otherwise the test above would pass on a run that simply sorted its keys."""
+    for listed in (SPEC["summary_json"]["required_fields"],
+                   SPEC["summary_json"]["decision_counts_key_order"],
+                   SPEC["retention_state_json"]["required_fields"]):
+        assert listed != sorted(listed), listed
+
+
 def test_decision_field_types_are_exact(primary_outputs):
     """Decision rows carry the contracted scalar types, including integer
     counts that must not be emitted as floats and booleans that must not be
