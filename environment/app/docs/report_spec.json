@@ -196,7 +196,8 @@
       "kept_count": "how many snapshots the repo keeps in total",
       "quota_used": "the GREATEST used_quota among the repo's kept snapshots -- the high-water mark the ledger reached over what survived, not a sum and not the value at the last one"
     },
-    "fields_are_exclusive": "the listed fields are the whole record: a row carries these and no others, the same way additional_files_allowed settles the output directory"
+    "fields_are_exclusive": "the listed fields are the whole record: a row carries these and no others, the same way additional_files_allowed settles the output directory",
+    "serialisation": "JSON object, two-space indent, keys sorted, trailing newline"
   },
   "runtime_budget_seconds": 120,
   "summary_json": {
@@ -242,7 +243,8 @@
       "max_peak_depth": "the greatest peak_depth on any decision",
       "decision_counts": "the per-kind counts again, keyed by decision"
     },
-    "fields_are_exclusive": "the listed fields are the whole record: a row carries these and no others, the same way additional_files_allowed settles the output directory"
+    "fields_are_exclusive": "the listed fields are the whole record: a row carries these and no others, the same way additional_files_allowed settles the output directory",
+    "serialisation": "JSON object, two-space indent, keys sorted, trailing newline"
   },
   "workflow_repair": {
     "cli_usage": "python3 /app/workflow/reconcile_retention.py --input PATH --output-dir PATH",
@@ -253,5 +255,9 @@
       "retention_policy": "/app/data/retention_policy.json"
     },
     "path": "/app/workflow/reconcile_retention.py"
+  },
+  "inventory_source": {
+    "path": "/app/data/snapshots.json",
+    "serialisation": "JSON array, two-space indent, trailing newline; each record carries its fields in the order the source lists them -- snapshot_id, repo, vault, ts, size_bytes, pinned, note -- and the key sorting the two report objects use does not apply here"
   }
 }

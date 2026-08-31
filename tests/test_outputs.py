@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import itertools
 import json
@@ -257,6 +258,26 @@ def _publish_inputs() -> None:
             pass
 
 
+def test_no_cleanup_in_this_suite_sits_after_a_return():
+    """A statement after a return never runs, and one such slip hid a real gap.
+
+    The owner-wide reap in _run_agent was written after its return, so it never
+    executed and processes a candidate left behind survived between runs. This
+    walks the suite's own parse tree so the same slip cannot come back quietly.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    stranded = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for index, statement in enumerate(node.body[:-1]):
+            if isinstance(statement, (ast.Return, ast.Raise)):
+                after = node.body[index + 1]
+                stranded.append(f"{node.name}() line {after.lineno}")
+    assert not stranded, f"unreachable statements: {stranded}"
+
+
 def test_data_dir_is_read_only_to_the_graded_reconciler():
     """The reconciler cannot write under /app/data, and says so when it tries.
 
@@ -392,13 +413,20 @@ def _candidate_dir() -> Path:
 
 
 def _run_agent(argv, cwd: Path):
-    """Run the submitted program under the unprivileged candidate UID with a scrubbed environment."""
-    return subprocess.run(
-        _SETPRIV + argv, check=True, capture_output=True, text=True, cwd=str(cwd),
-        env=dict(_CANDIDATE_ENV), timeout=_RUN_TIMEOUT,
-        preexec_fn=_apply_rlimits,
-    )
-    reap_candidate_uid()
+    """Run the submitted program under the unprivileged candidate UID with a scrubbed environment.
+
+    The owner-wide reap runs in a finally block. It sat after the return, where
+    it never executed, so a candidate that left a process behind was cleared only
+    by the sweep test.sh does at the very end rather than between runs.
+    """
+    try:
+        return subprocess.run(
+            _SETPRIV + argv, check=True, capture_output=True, text=True, cwd=str(cwd),
+            env=dict(_CANDIDATE_ENV), timeout=_RUN_TIMEOUT,
+            preexec_fn=_apply_rlimits,
+        )
+    finally:
+        reap_candidate_uid()
 
 
 def _run_pipeline(tmp_path: Path, script_path: Path = WORKFLOW_PATH, input_path: Path = DEFAULT_INPUT):
