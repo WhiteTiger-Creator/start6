@@ -96,6 +96,15 @@
   },
   "inventory_source": {
     "path": "/app/data/snapshots.json",
+    "record_field_order": [
+      "snapshot_id",
+      "repo",
+      "vault",
+      "ts",
+      "size_bytes",
+      "pinned",
+      "note"
+    ],
     "serialisation": "JSON array, two-space indent, trailing newline; each record carries its fields in the order the source lists them -- snapshot_id, repo, vault, ts, size_bytes, pinned, note -- and the key sorting the two report objects use does not apply here"
   },
   "output_files": {

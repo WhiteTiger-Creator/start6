@@ -527,28 +527,36 @@ def test_peak_depth_matches_an_independent_recomputation(primary_outputs):
     for row in decisions:
         by_repo.setdefault(row["repo"], []).append(row)
 
-    repo = min(by_repo, key=lambda name: len(by_repo[name]))
-    # protection_days is a resolved policy value, not the baseline: two repos
-    # override it, and using the wrong span here would compare two different
-    # figures rather than checking the pipeline.
-    span = int(_resolve(repo, json.loads(POLICY_PATH.read_text()))["protection_days"]) * 86400
-    rows = sorted(by_repo[repo], key=lambda r: r["ts"])
-    starts = sorted(r["ts"] for r in rows)
-    checked = 0
-    for row in rows[:: max(1, len(rows) // 40)][:40]:
-        window_start, window_end = row["ts"], row["ts"] + span
-        marks = {window_start, window_end}
-        marks.update(t for t in starts if window_start <= t <= window_end)
-        marks.update(
-            t + span for t in starts if window_start <= t + span <= window_end
-        )
-        best = 0
-        for instant in sorted(marks):
-            live = sum(1 for r in rows if r["ts"] <= instant <= r["ts"] + span)
-            best = max(best, live)
-        assert row["peak_depth"] == best, f"{row['snapshot_id']}: {row['peak_depth']} vs {best}"
-        checked += 1
-    assert checked >= 10
+    # the smallest repo alone leaves a bug confined to the larger ones to the
+    # digest check; the largest and a middling one are recomputed here too
+    ranked = sorted(by_repo, key=lambda name: len(by_repo[name]))
+    sampled = {ranked[0], ranked[-1], ranked[len(ranked) // 2]}
+    for repo in sorted(sampled):
+        # protection_days is a resolved policy value, not the baseline: two repos
+        # override it, and using the wrong span here would compare two different
+        # figures rather than checking the pipeline.
+        span = int(_resolve(repo, json.loads(POLICY_PATH.read_text()))["protection_days"]) * 86400
+        rows = sorted(by_repo[repo], key=lambda r: r["ts"])
+        starts = sorted(r["ts"] for r in rows)
+        checked = 0
+        # each sampled row sweeps the whole repo, so the sample shrinks as the
+        # repo grows: the point is independent evidence on repos of every size,
+        # and the sealed digest already covers every row of every repo
+        take = 40 if len(rows) <= 400 else 8
+        for row in rows[:: max(1, len(rows) // take)][:take]:
+            window_start, window_end = row["ts"], row["ts"] + span
+            marks = {window_start, window_end}
+            marks.update(t for t in starts if window_start <= t <= window_end)
+            marks.update(
+                t + span for t in starts if window_start <= t + span <= window_end
+            )
+            best = 0
+            for instant in sorted(marks):
+                live = sum(1 for r in rows if r["ts"] <= instant <= r["ts"] + span)
+                best = max(best, live)
+            assert row["peak_depth"] == best, f"{row['snapshot_id']}: {row['peak_depth']} vs {best}"
+            checked += 1
+        assert checked >= 5
 
 
 def test_overlap_matches_an_independent_recomputation(primary_outputs):
@@ -565,23 +573,27 @@ def test_overlap_matches_an_independent_recomputation(primary_outputs):
     for row in decisions:
         by_repo.setdefault(row["repo"], []).append(row)
 
-    repo = min(by_repo, key=lambda name: len(by_repo[name]))
-    span = int(_resolve(repo, json.loads(POLICY_PATH.read_text()))["protection_days"]) * 86400
-    rows = sorted(by_repo[repo], key=lambda r: r["ts"])
-    checked = 0
-    for row in rows[:: max(1, len(rows) // 40)][:40]:
-        low, high = row["ts"], row["ts"] + span
-        expected = sum(
-            1 for other in rows
-            if other["snapshot_id"] != row["snapshot_id"]
-            and other["ts"] <= high and low <= other["ts"] + span
-        )
-        assert row["overlap_count"] == expected, (
-            f"{row['snapshot_id']}: reported {row['overlap_count']}, counted {expected}")
-        checked += 1
-    assert checked, "no decision was checked"
-    # and the figure is not a constant the engine never actually computed
-    assert len({d["overlap_count"] for d in decisions}) > 1
+    # the smallest repo alone leaves a bug confined to the larger ones to the
+    # digest check; the largest and a middling one are recomputed here too
+    ranked = sorted(by_repo, key=lambda name: len(by_repo[name]))
+    sampled = {ranked[0], ranked[-1], ranked[len(ranked) // 2]}
+    for repo in sorted(sampled):
+        span = int(_resolve(repo, json.loads(POLICY_PATH.read_text()))["protection_days"]) * 86400
+        rows = sorted(by_repo[repo], key=lambda r: r["ts"])
+        checked = 0
+        for row in rows[:: max(1, len(rows) // 40)][:40]:
+            low, high = row["ts"], row["ts"] + span
+            expected = sum(
+                1 for other in rows
+                if other["snapshot_id"] != row["snapshot_id"]
+                and other["ts"] <= high and low <= other["ts"] + span
+            )
+            assert row["overlap_count"] == expected, (
+                f"{row['snapshot_id']}: reported {row['overlap_count']}, counted {expected}")
+            checked += 1
+        assert checked, "no decision was checked"
+        # and the figure is not a constant the engine never actually computed
+        assert len({d["overlap_count"] for d in decisions}) > 1
 
 
 def test_overlap_is_scoped_to_the_repo(primary_outputs):
@@ -778,7 +790,11 @@ def test_the_artifacts_carry_their_keys_in_the_order_the_contract_states(
     # the rebuilt inventory is the one place the report orders do not apply
     raw = DEFAULT_INPUT.read_text(encoding="utf-8")
     records = json.loads(raw, object_pairs_hook=list)
-    source_order = ["snapshot_id", "repo", "vault", "ts", "size_bytes", "pinned", "note"]
+    # read from the contract rather than repeated here, so the rule the test
+    # enforces and the rule the agent can read are the same string
+    source_order = SPEC["inventory_source"]["record_field_order"]
+    assert source_order == ["snapshot_id", "repo", "vault", "ts", "size_bytes",
+                            "pinned", "note"], "the contract's stated order moved"
     for record in records[:200]:
         assert [key for key, _ in record] == source_order, (
             "a rebuilt inventory record does not carry the source field order")
@@ -788,7 +804,8 @@ def test_the_contracted_orders_are_not_alphabetical():
     """Otherwise the test above would pass on a run that simply sorted its keys."""
     for listed in (SPEC["summary_json"]["required_fields"],
                    SPEC["summary_json"]["decision_counts_key_order"],
-                   SPEC["retention_state_json"]["required_fields"]):
+                   SPEC["retention_state_json"]["required_fields"],
+                   SPEC["inventory_source"]["record_field_order"]):
         assert listed != sorted(listed), listed
 
 
