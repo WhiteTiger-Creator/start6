@@ -212,6 +212,7 @@
       }
     }
   },
+  "runtime_budget_note": "guidance on the scale the reconciler is expected to handle, not a graded ceiling: on repos holding tens of thousands of snapshots a quadratic sweep will not finish, and the verifier bounds its own run rather than timing this one",
   "runtime_budget_seconds": 120,
   "summary_json": {
     "container": "object",

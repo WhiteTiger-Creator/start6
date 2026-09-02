@@ -32,6 +32,7 @@
   "catalogue_digest": "b102979329a2dc8a32a902473675700fe07581ff217926a12ccdb64ff73f0097",
   "input_bytes_sha256": {
     "pin_registry.json": "1a1cea61107739ff1b625d8d124c18fb86abf7e13db9597e4cb4943eac5ebb80",
+    "report_spec.json": "8d8237a32a1d5a4c3f561ab12c9690991449362eae14f69fd27c7edadab37c94",
     "retention_policy.json": "3168f954590efd04fe5eb2d80bd3de11d3010162185b8481a4f6e28f9ee2a90e",
     "snapshot_catalogue_pre_incident.json": "8e36611ffeb0a495a76be8517151f5b05d5ecb2c6b1b4a02dc8d3aa179198b0c",
     "snapshot_replay_journal.json": "e8b742d5e491ba38e2ce7e59f5d64a8b29fecdf6d79916a51b6949b95dcf8fdd"
