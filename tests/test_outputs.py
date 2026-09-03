@@ -790,9 +790,20 @@ def test_the_artifacts_carry_their_keys_in_the_order_the_contract_states(
     source_order = SPEC["inventory_source"]["record_field_order"]
     assert source_order == ["snapshot_id", "repo", "vault", "ts", "size_bytes",
                             "pinned", "note"], "the contract's stated order moved"
-    for record in records[:200]:
+    # every record, not a leading sample: a run that got the order right for the
+    # first two hundred and wrong afterwards passed the old form
+    for number, record in enumerate(records, start=1):
         assert [key for key, _ in record] == source_order, (
-            "a rebuilt inventory record does not carry the source field order")
+            f"inventory record {number} does not carry the source field order")
+
+    # inventory_source states the layout too, and nothing asserted it, so an
+    # inventory with the right content at the wrong indent passed every check
+    stated = SPEC["inventory_source"]["serialisation"]
+    assert "two-space indent" in stated and "trailing newline" in stated, stated
+    assert raw.endswith("\n") and not raw.endswith("\n\n"), (
+        "the rebuilt inventory does not end in exactly one newline")
+    assert raw == json.dumps(json.loads(raw), indent=2) + "\n", (
+        "the rebuilt inventory is not the two-space indent inventory_source states")
 
 
 def test_the_contracted_orders_are_not_alphabetical():
