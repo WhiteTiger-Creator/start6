@@ -8,6 +8,7 @@ import itertools
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import sys
@@ -73,6 +74,7 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+RUNTIME_BUDGET_SECONDS = 120
 # Documented wall-clock budget for one full run on the graded inventory.
 # instruction.md and report_spec.json state the same number. The reference reads
 # each protection-window overlap off ordered endpoints and finishes in a few
@@ -302,6 +304,19 @@ def test_data_dir_is_read_only_to_the_graded_reconciler():
     result = subprocess.run(
         _SETPRIV + [sys.executable, str(probe)],
         capture_output=True, text=True, cwd=str(probe_dir), check=False)
+    # the verdict is taken root-side from the directory itself, not from what the
+    # probe chose to print: a subprocess's stdout is the wrong place to learn
+    # whether a permission holds, since the thing under test could shape it
+    mode = DATA_DIR.stat().st_mode
+    assert not (mode & stat.S_IWOTH), (
+        f"/app/data is world-writable ({stat.filemode(mode)}), so a reconciler "
+        "that rebuilds the inventory in its own run would be graded as correct")
+    assert DATA_DIR.stat().st_uid == 0, "/app/data is not root-owned"
+    for entry in sorted(DATA_DIR.iterdir()):
+        emode = entry.stat().st_mode
+        assert not (emode & stat.S_IWOTH), (
+            f"{entry.name} is world-writable ({stat.filemode(emode)})")
+    # the probe corroborates it from the candidate's own side of the boundary
     assert result.returncode == 0, result.stderr[-2000:]
     assert result.stdout.strip() == "refused", (
         "the graded reconciler can write under /app/data, so an engine that "
@@ -421,6 +436,11 @@ def _run_agent(argv, cwd: Path):
             _SETPRIV + argv, check=True, capture_output=True, text=True, cwd=str(cwd),
             env=dict(_CANDIDATE_ENV),
             preexec_fn=_apply_rlimits,
+            # report_spec.json publishes runtime_budget_seconds and the suite never
+            # enforced it, so a reconciler comparing protection windows pairwise ran
+            # until the whole verifier timed out rather than failing on its own run.
+            # This is a hard kill on the budget, not a measurement of elapsed time.
+            timeout=RUNTIME_BUDGET_SECONDS,
         )
     finally:
         reap_candidate_uid()
@@ -1417,6 +1437,23 @@ def test_standard_gfs_retention_produces_wrong_answers(tmp_path: Path):
 # --------------------------------------------------------------------------
 # Sources stay operational
 # --------------------------------------------------------------------------
+def test_the_runtime_budget_is_published_and_is_what_a_run_is_held_to():
+    """report_spec.json states a budget, and nothing tied the suite to it.
+
+    The comments in this file described a budget being enforced while every
+    graded run was launched with no deadline at all, so a reconciler comparing
+    protection windows pairwise ran until the whole verifier timed out rather
+    than failing on its own run. The constant here is the one _run_agent kills
+    at, and this pins it to the number the agent can read.
+    """
+    spec = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
+    assert spec["runtime_budget_seconds"] == RUNTIME_BUDGET_SECONDS, (
+        "the published budget and the one a graded run is held to disagree: "
+        f"{spec['runtime_budget_seconds']} against {RUNTIME_BUDGET_SECONDS}")
+    assert "runtime_budget_seconds" in spec["runtime_budget_note"], (
+        "the note beside the budget does not say a run is held to it")
+
+
 def test_governance_log_present():
     """The governance log the rules are reconstructed from is present in the environment."""
     assert LOG_PATH.exists() and LOG_PATH.stat().st_size > 0
