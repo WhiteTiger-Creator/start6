@@ -316,9 +316,13 @@ def test_data_dir_is_read_only_to_the_graded_reconciler():
         emode = entry.stat().st_mode
         assert not (emode & stat.S_IWOTH), (
             f"{entry.name} is world-writable ({stat.filemode(emode)})")
-    # the probe corroborates it from the candidate's own side of the boundary
+    # The probe corroborates the same boundary from the candidate's own side. It
+    # is deliberately NOT an equality against what the probe printed: a value the
+    # graded side produces is the wrong thing to decide a permission on, so the
+    # stat above is the verdict and this only refuses the one word that would
+    # mean the write went through.
     assert result.returncode == 0, result.stderr[-2000:]
-    assert result.stdout.strip() == "refused", (
+    assert "writable" not in result.stdout, (
         "the graded reconciler can write under /app/data, so an engine that "
         "rebuilds the inventory in its own run would be graded as correct "
         f"instead of refused: {result.stdout!r}")
@@ -446,6 +450,39 @@ def _run_agent(argv, cwd: Path):
         reap_candidate_uid()
 
 
+def _stage_input(src: Path, dst: Path) -> None:
+    """Copy `src` to `dst` as a regular file, never through a link.
+
+    The default input is /app/data/snapshots.json, the one path under /app/data
+    the agent is told to replace, and staging runs as root. shutil.copy follows
+    the source link, so a submission that left a symlink there instead of a
+    rebuilt inventory pointed root at whatever it named -- the sealed fixtures
+    under /tests included -- and had the contents laid down at 0644 inside the
+    candidate's own work area, where the graded program reads it. O_NOFOLLOW
+    refuses the link at the final component and the fstat refuses anything that
+    is not a regular file.
+    """
+    try:
+        handle = os.open(str(src), os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as exc:
+        raise AssertionError(
+            f"{src} could not be staged as a regular file: {exc}") from exc
+    try:
+        info = os.fstat(handle)
+        assert stat.S_ISREG(info.st_mode), (
+            f"{src} is not a regular file, so it is not staged")
+        payload = b""
+        while True:
+            chunk = os.read(handle, 1 << 20)
+            if not chunk:
+                break
+            payload += chunk
+    finally:
+        os.close(handle)
+    dst.write_bytes(payload)
+    os.chmod(dst, 0o644)
+
+
 def _run_pipeline(tmp_path: Path, script_path: Path = WORKFLOW_PATH, input_path: Path = DEFAULT_INPUT):
     _publish_inputs()
     work = _candidate_dir()
@@ -453,13 +490,14 @@ def _run_pipeline(tmp_path: Path, script_path: Path = WORKFLOW_PATH, input_path:
     out_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(out_dir, 0o777)
     staged_input = work / "input.json"
-    shutil.copy(str(input_path), str(staged_input))
-    os.chmod(staged_input, 0o644)
+    _stage_input(Path(input_path), staged_input)
     result = _run_agent(
         [sys.executable, str(script_path), "--input", str(staged_input), "--output-dir", str(out_dir)],
         cwd=work,
     )
-    assert result.returncode == 0
+    assert result.returncode == 0, (
+        f"the run exited {result.returncode}\n"
+        f"stdout: {result.stdout[-2000:]}\nstderr: {result.stderr[-2000:]}")
     summary = _load_json(out_dir / "summary.json")
     state = _load_json(out_dir / "retention_state.json")
     decisions = _load_jsonl(out_dir / "retention_decisions.jsonl")
@@ -1268,6 +1306,56 @@ def test_cli_defaults_work_and_match_explicit_run(tmp_path: Path):
     assert _digest(_load_json(default_out / "retention_state.json")) == _digest(explicit_state)
     assert _digest(_load_jsonl(default_out / "retention_decisions.jsonl")) == \
         _digest(explicit_decisions)
+
+
+def test_staging_the_run_input_does_not_follow_a_planted_link():
+    """The inventory sits on the one /app/data path the agent replaces, and staging runs as root.
+
+    Every graded run copies /app/data/snapshots.json into the candidate's own
+    work area. That copy followed the source link, so a submission that left a
+    symlink there instead of a rebuilt inventory pointed root at whatever it
+    named -- the sealed fixtures under /tests included -- and had the contents
+    laid down at 0644 where the graded program reads them. Staging now refuses
+    anything that is not a regular file, and this plants the link to prove it.
+    """
+    sentinel = Path("/tests/fixtures/expected_report.json")
+    if not sentinel.exists():
+        sentinel = SPEC_PATH
+    original = DEFAULT_INPUT.read_bytes()
+    mode = DEFAULT_INPUT.stat().st_mode & 0o7777
+    try:
+        DEFAULT_INPUT.unlink()
+        DEFAULT_INPUT.symlink_to(sentinel)
+        staged = _candidate_dir() / "input.json"
+        with pytest.raises(AssertionError):
+            _stage_input(DEFAULT_INPUT, staged)
+        assert not staged.exists(), (
+            "the planted link was staged anyway, so its target is now readable "
+            "at the path the graded program is handed")
+    finally:
+        if DEFAULT_INPUT.is_symlink() or DEFAULT_INPUT.exists():
+            DEFAULT_INPUT.unlink()
+        DEFAULT_INPUT.write_bytes(original)
+        os.chmod(DEFAULT_INPUT, mode)
+    assert DEFAULT_INPUT.read_bytes() == original
+
+
+def test_a_run_leaves_its_artifacts_where_it_wrote_them():
+    """instruction.md says the three files are left there rather than cleared away.
+
+    Every other check here reads the artifacts straight after the run that made
+    them, so a reconciler that wrote them and then tidied up on its way out
+    satisfied all of them. This runs once, then looks at the directory again
+    after the process has exited and the work area has been swept.
+    """
+    out_dir, _, _, _ = _run_pipeline(_candidate_dir())
+    reap_candidate_uid()
+    survivors = sorted(q.name for q in out_dir.iterdir())
+    assert survivors == ["retention_decisions.jsonl", "retention_state.json",
+                         "summary.json"], (
+        f"the run did not leave its three artifacts behind: {survivors}")
+    for name in survivors:
+        assert (out_dir / name).stat().st_size > 0, f"{name} was left empty"
 
 
 def test_submitted_program_runs_unprivileged_and_cannot_write_reward(tmp_path: Path):
